@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Wi-Fi &amp; Bluetooth Recorder"
+            android:textAppearance="?attr/textAppearanceHeadlineSmall"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Stopped"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Start recording"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/stopButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Stop recording"
+            android:enabled="false"
+            android:layout_marginBottom="20dp" />
+
+        <TextView
+            android:id="@+id/fileText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Record file: shared external storage"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/exportButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Export recording file"
+            android:layout_marginBottom="20dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Nearby BLE devices"
+            android:textAppearance="?attr/textAppearanceTitleMedium"
+            android:layout_marginBottom="8dp" />
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/bleScrollView"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:background="#F2F2F2"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:id="@+id/bleDevicesText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No BLE advertisements seen yet."
+                android:fontFamily="monospace"
+                android:padding="12dp" />
+        </androidx.core.widget.NestedScrollView>
+
+        <TextView
+            android:id="@+id/noteText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="A foreground service records GPS, Wi-Fi scan results, and Bluetooth discovery results approximately every 5 seconds. Android and device firmware may throttle scans or omit fields."
+            android:textAppearance="?attr/textAppearanceBodySmall" />
+
+    </LinearLayout>
+</ScrollView>
