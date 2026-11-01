@@ -1,0 +1,42 @@
+package com.example.wifibluetoothrecorder
+
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import android.widget.Button
+import android.widget.TextView
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class ScreenTest {
+    @Test fun mainScreenShowsSummaryHistoryAndCsvActions() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue(activity.findViewById<TextView>(R.id.statsText).text.contains("Elapsed:"))
+                assertTrue(activity.findViewById<TextView>(R.id.statsText).text.contains("Bluetooth records:"))
+                assertTrue(activity.findViewById<Button>(R.id.historyButton).isEnabled)
+                assertTrue(activity.findViewById<Button>(R.id.exportButton).text.contains("CSV"))
+                assertFalse(activity.findViewById<Button>(R.id.stopButton).isEnabled)
+            }
+        }
+    }
+    @Test fun historyAndMapScreensOpenWithoutRadioPermissions() {
+        ActivityScenario.launch(HistoryActivity::class.java).use { scenario ->
+            scenario.onActivity { assertFalse(it.isFinishing) }
+        }
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val id=RecordingStore.get(context).start()
+        RecordingStore.get(context).finish(id)
+        val intent=android.content.Intent(context,RecordingMapActivity::class.java).putExtra("recording_id",id)
+        ActivityScenario.launch<RecordingMapActivity>(intent).use { scenario ->
+            scenario.onActivity { assertFalse(it.isFinishing) }
+        }
+    }
+    @Test fun launcherUsesPocketDriverLabelAndAdaptiveIcon() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        assertEquals("PocketDriver",context.applicationInfo.loadLabel(context.packageManager).toString())
+        assertTrue(context.applicationInfo.loadIcon(context.packageManager) is android.graphics.drawable.AdaptiveIconDrawable)
+    }
+}

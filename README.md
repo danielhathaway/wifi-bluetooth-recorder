@@ -1,197 +1,79 @@
-# Wi-Fi & Bluetooth Recorder
+# PocketDriver
 
-An Android application that records nearby Wi-Fi scan results and discoverable/classic Bluetooth devices approximately every five seconds, together with the phone's most recent GPS location and an ISO-8601 timestamp.
+PocketDriver records Wi-Fi observations, classic Bluetooth discovery, BLE advertisements, and location fixes in an encrypted SQLite database on the device. A foreground service continues recording while the screen is off or another app is open.
 
-## Important Android limitations
+## Recording and history
 
-The application requests a scan every five seconds, but Android and individual phone vendors can throttle or reject scans. The five-second interval is therefore a requested sampling interval, not a guarantee that a new radio scan will occur every five seconds.
+1. Start a recording and grant precise location and Bluetooth permissions. Enable device location services and the radios you want to scan.
+2. The scan summary shows elapsed time, committed Bluetooth records (classic plus BLE), fresh Wi-Fi observations, and estimated distance in meters. Wi-Fi observations retain every distinct timestamp for each BSSID, including results arriving out of order; only identical BSSID/timestamp results are counted once. Summary values remain visible after stopping until another recording begins.
+3. Stop recording to finish the session. Observations commit continuously on a background writer, not in one save at the end. Ready radio observations are committed in small batches with their summary counters; location updates commit immediately. Signals can wait up to six seconds for a matching GPS update, with a one-second flush timer and a bounded queue. Stopping flushes only that short pending window.
+4. Open **Previous recordings & maps**, select a recording, and see its geographic observation points. Zero coordinates are valid; observations without a usable location remain stored and exported but have no map point. The map includes location fixes collected between radio sightings.
+5. Use **Export entire database as CSV**, or **Export this recording as CSV** from the map screen. The Android document picker chooses the destination. Exports include session metadata, observation rows, and empty sessions. A consistent prefix of each recording is streamed without blocking subsequent recording commits.
 
-Wi-Fi scan results can also be cached by the operating system. Bluetooth classic discovery only reports devices that are discoverable through that discovery mechanism. This application does not attempt to bypass Android radio, privacy, or permission controls.
+Location updates are requested every second. Fixes with accuracy worse than 50 meters or invalid coordinates are ignored. Wi-Fi and BLE observations are matched to GPS history using the signal's **measurement time**, not callback arrival time. Both radio timestamps and GPS fix timestamps use elapsed realtime since boot, so delayed/batched or out-of-order callbacks and wall-clock adjustments do not move a signal onto the current position.
 
-On Android 12 and later, Bluetooth scan/connect permissions are runtime permissions. Location permission is required for Wi-Fi scan results. The application uses a foreground service while recording so recording can continue while the app is not visible.
+A matching fix is used directly. Otherwise, coordinates are estimated by interpolation between fixes no more than five seconds either side of the measurement, or by the nearest fix within one second. These are labelled `exact`, `interpolated`, or `nearest` in `data_json`; even an exact timestamp match retains the GPS sensor's spatial uncertainty. Without a suitable fix, the observation is still saved with blank coordinates and `location_match=no_matching_fix`. Fix history is retained for the current recording so delayed signals can match earlier positions.
 
-## What is recorded
+Classic Bluetooth `ACTION_FOUND` broadcasts do not expose a hardware measurement timestamp. Those records retain their callback time, have blank coordinates, and are explicitly labelled `time_source=callback` and `location_match=measurement_time_unavailable`. They must not be treated as measurement-time location samples.
 
-Each output line is one JSON object. The file is JSON Lines (JSONL), which is convenient for long-running recordings because records can be appended without rewriting the entire file.
+Distance is the sum of great-circle distances between accepted chronological fixes, so GPS noise can overestimate travel and gaps can underestimate it. It is an estimate, not an odometer.
 
-Example Wi-Fi record:
+Android can throttle/reject Wi-Fi and Bluetooth scans. A Wi-Fi/classic discovery request is attempted every five seconds; BLE uses a continuous scan to avoid repeated-start throttling. Classic discovery is allowed to finish rather than being cancelled every five seconds. Hardware validation requires a physical device. If a save fails, recording stops and the main screen reports the error.
 
-```json
-{"type":"wifi","location":"34.0000000,-118.0000000","time":"2026-09-22T17:00:00Z","data":{"bssid":"aa:bb:cc:dd:ee:ff","ssid":"Example","mode":"unknown","chan":36,"rate":"80","signal":-55,"security":"WPA2"}}
-```
+## Storage and encryption
 
-Example classic Bluetooth record:
+The app-private `databases/pocketdriver.db` uses SQLCipher 4.10.0, including encrypted journal/WAL pages. A random database password is wrapped using AES-GCM with an Android Keystore key; only the wrapped value is stored in preferences. Backup and device transfer exclude the database and key material because the Keystore key cannot be restored on a different installation. Uninstalling the app removes access to its recordings, so export data you want to keep.
 
-```json
-{"type":"bluetooth","location":"34.0000000,-118.0000000","time":"2026-09-22T17:00:00Z","data":{"name":"Example Device","mac":"11:22:33:44:55:66","class":"1032"}}
-```
+The `recordings` table stores session timestamps, committed counts, and distance. Every session has its own `recording_<id>` table, with columns `id`, `time`, `type`, `transport`, `latitude`, `longitude`, and `data`. Inserts and counter updates occur in the same transaction. On process restart, interrupted sessions end at their last commit. Previously committed records survive a crash; queued observations that have not committed can be lost.
 
-Example BLE advertisement record:
+The old public `network-records.jsonl` files are not altered or imported. New recordings no longer write to shared storage, and storage permissions are no longer needed.
 
-```json
-{"type":"bluetooth_le","location":"34.0000000,-118.0000000","time":"2026-09-22T17:00:00Z","data":{"name":"Example BLE Device","mac":"11:22:33:44:55:66","rssi":-62,"tx_power":-4,"manufacturer_data":{"76":"0215..."},"service_uuids":["0000180d-0000-1000-8000-00805f9b34fb"],"service_data":{"00001816-0000-1000-8000-00805f9b34fb":"..."}}}
-```
+## Bluetooth data model
 
-### Fields
+Classic discovery and BLE scan callbacks represent different observations, even when addresses match. Classic discovery provides a device class; BLE provides advertisement RSSI, transmit power, manufacturer bytes, service UUIDs, and service data. BLE addresses can rotate, and a dual-mode device can appear in both scan mechanisms. Merging sightings by address would lose information and can incorrectly associate devices.
 
-- `type`: `wifi`, `bluetooth`, or `bluetooth_le`
-- `location`: latitude,longitude in decimal degrees
-- `time`: UTC ISO-8601 timestamp
-- Wi-Fi:
-  - `bssid`: access point BSSID, when supplied by Android
-  - `ssid`: network name
-  - `mode`: currently `unknown` because Android's public `ScanResult` API does not expose the AP mode in a portable way
-  - `chan`: channel derived from the scan frequency
-  - `rate`: channel-width value exposed by the Android API
-  - `signal`: RSSI in dBm
-  - `security`: basic classification from the scan capabilities
-- Bluetooth:
-  - `name`: device name, when Android makes it available
-  - `mac`: Bluetooth address, subject to Android permissions and device behavior
-  - `class`: Bluetooth device class integer, when available
-- Bluetooth Low Energy:
-  - `name`: BLE advertisement/scan-record name, when present
-  - `mac`: BLE advertiser address
-  - `rssi`: received signal strength in dBm
-  - `tx_power`: transmitted power when supplied, otherwise `null`
-  - `manufacturer_data`: manufacturer/company ID mapped to hexadecimal advertisement bytes
-  - `service_uuids`: advertised service UUIDs
-  - `service_data`: service UUID mapped to hexadecimal service-data bytes
+Both now use `type=bluetooth`, with `transport=classic` or `transport=le`. Shared fields are `name`, `mac`, and `rssi` (classic RSSI when supplied). Classic retains `class`; BLE retains `tx_power`, `manufacturer_data`, `service_uuids`, and `service_data`. Observations remain separate rows. JSON payloads are constructed with Android's JSON encoder to preserve arbitrary names and control characters.
 
-## Output file
+Wi-Fi retains BSSID, SSID, channel, signal, security, unknown mode, Android channel width (`channel_width`, not a bitrate), and the original `scan_timestamp_us`. BLE also retains `scan_timestamp_ns`. Location rows contain accuracy in meters and `elapsed_realtime_ns`.
 
-The application writes:
+New radio payloads include `measurement_alignment_version=1`, `measurement_elapsed_ns`, `received_time_ms`, `received_elapsed_ns`, `time_source`, and `location_match`. Located signals also retain `location_before` and `location_after`, containing the original GPS coordinates, fix times, elapsed timestamps and accuracy estimates used in the match. This evidence is exported in the JSON column for later filtering or source-location analysis. Missing or invalid sensor timestamps never receive an invented measurement-time location.
+
+Existing records are preserved as recorded. Older rows without `measurement_alignment_version` used processing-time GPS and cannot be corrected automatically.
+
+## CSV format
+
+UTF-8, quoted fields, escaped double quotes, CRLF record separators. Columns:
 
 ```text
-network-records.jsonl
+recording_id,started_ms,ended_ms,distance_m,record_id,time_ms,type,transport,latitude,longitude,data_json
 ```
 
-to public shared storage accessible by user file managers:
+Timestamps are Unix milliseconds. For new Wi-Fi/BLE rows, `time_ms` is the measurement time derived from a fixed wall/elapsed clock anchor captured at service creation. Callback time is kept separately in `data_json.received_time_ms`. Location rows retain the fix's own UTC time. If a measurement timestamp is unavailable or invalid, the record uses callback time and is explicitly marked. Blank coordinates mean no reliable measurement-time location match. The final column contains the complete type-specific JSON payload, preserving nested BLE advertisement data. Empty sessions have a metadata-only row. CSV files are unencrypted and are written only to a destination chosen by the user.
 
-```text
-/storage/emulated/0/Documents/WifiBluetoothRecorder/network-records.jsonl
-```
-*(or `/storage/emulated/0/Download/WifiBluetoothRecorder/network-records.jsonl` depending on storage permissions)*.
+## Maps and privacy
 
-The main screen displays the exact output file path on your device. You can also tap **Export recording file** at any time to export a copy of the recording to any location (Downloads, SD card, Drive, etc.) using the Android Storage Access Framework system file picker.
+The app does not upload observation records. Viewing maps downloads OpenStreetMap tiles, which disclose the requested map area and network address to that tile service. OpenStreetMap attribution is shown on the map. Recorded points can be drawn without connectivity; background tiles need internet or an existing cache. Map tiles are cached privately in the app cache directory.
 
-## Requirements
+## Branding
 
-- Android Studio with an Android SDK that includes API 35.
-- JDK 17.
-- A physical Android device is strongly recommended. Wi-Fi and Bluetooth scanning are generally not useful on an emulator.
-- Location services enabled on the device.
-- Wi-Fi and Bluetooth hardware enabled when their respective data is required.
+The launcher label is **PocketDriver**. Its vector adaptive icon has separate full-bleed background and foreground layers on a 108dp canvas, with a pocket/road symbol inside the central 66dp safe zone and a monochrome layer for themed icons. The application ID remains `com.example.wifibluetoothrecorder` so this can update an existing installation.
 
-## Build
+## Build and test
 
-1. Open this directory in Android Studio.
-2. Allow Android Studio to download the Gradle and Android dependencies.
-3. Make sure JDK 17 is selected for Gradle.
-4. Connect an Android device with USB debugging enabled, or create an appropriate physical-device run configuration.
-5. Build with **Build > Make Project**, or from a terminal using the included Gradle wrapper:
+Requirements: JDK 17, Android SDK API 35, Gradle 8.11.1 (wrapper JAR and configuration included). Point `ANDROID_HOME` to the SDK or set `sdk.dir` in an untracked `local.properties`.
 
 ```bash
-./gradlew assembleDebug
+gradle :app:assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest
+# With a connected device/emulator:
+gradle :app:connectedDebugAndroidTest
 ```
 
-> **Note:** If both `ANDROID_PREFS_ROOT` and `ANDROID_USER_HOME` environment variables are set in your environment, Android Gradle Plugin may fail with an `AndroidLocationsException`. You can run `./gradlew` with `ANDROID_PREFS_ROOT` unset:
-> ```bash
-> env -u ANDROID_PREFS_ROOT ./gradlew assembleDebug
-> ```
+APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
-The debug APK will be under:
+There were no tests in the original repository. JVM tests now cover CSV escaping, elapsed time, session table validation, distance/date-line math, Wi-Fi cache deduplication, channel mapping, security classification, and measurement-time GPS correlation (delayed/out-of-order signals and GPS fixes, interpolation, date-line handling, timing gaps, invalid timestamps, wall-clock changes, bounded buffering and stop-time flushing). Android instrumentation tests cover actual encrypted database transactions, session isolation, both Bluetooth transports, coordinate handling, full/single/empty exports, concurrent export/writes, persisted observations after reopen, interrupted-session recovery, wrong-key rejection, Keystore wrapping, matched-location/timing metadata surviving CSV export, and explicit handling of missing measurement timestamps.
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
+For physical-device QA: start and stop multiple scans, reopen the app, confirm history and points, export one recording and all recordings via the document picker, deny/regrant permissions, disable radios, and confirm scanning resumes when they are enabled. Check background recording and compare observed signals with known nearby devices; an emulator cannot validate the radio data.
 
-## Install
+Dependencies: [SQLCipher for Android](https://github.com/sqlcipher/sqlcipher-android), [osmdroid](https://github.com/osmdroid/osmdroid), AndroidX, and Google Play Services Location. Adaptive icon design follows [Android's icon guidance](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive).
 
-From Android Studio, press **Run** and select the connected device.
-
-Or with ADB:
-
-```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-## Use
-
-1. Launch **Wi-Fi & Bluetooth Recorder**.
-2. Press **Start recording**.
-3. Grant the requested location and Bluetooth permissions.
-4. Grant notification permission on Android versions that request it.
-5. Leave the recording service running. A persistent notification indicates that recording is active.
-6. While recording, the **Nearby BLE devices** section shows the latest RSSI observed for each BLE advertiser.
-7. Press **Stop recording** when finished.
-7. The collected records remain in `network-records.jsonl`.
-
-The file is appended to between recording sessions. Starting a new session does not automatically erase the previous data.
-
-## Permissions
-
-The application declares:
-
-- Fine/coarse location: required for location and Wi-Fi scan results.
-- Bluetooth scan/connect: required on Android 12+ for classic Bluetooth discovery and BLE advertisement scanning/device information. The BLE scan permission is intentionally not marked `neverForLocation` because BLE observations are recorded together with GPS coordinates.
-- Legacy Bluetooth permissions: used on Android 11 and earlier.
-- Foreground service/location: allows the recording service to continue while the UI is not visible.
-- Notifications: used for the foreground-service notification on Android 13+.
-
-## Privacy
-
-The recorded file can contain identifiers such as Wi-Fi BSSIDs, SSIDs, Bluetooth addresses, and GPS coordinates. Treat the output as sensitive location/network-observation data and protect or delete it as appropriate.
-
-The application does not upload the recording to a server. The data remains on the device unless the user copies it elsewhere.
-
-## Troubleshooting
-
-### No Wi-Fi records
-
-Check that:
-
-- Location permission is granted.
-- Device location services are enabled.
-- Wi-Fi is enabled.
-- The device permits Wi-Fi scans.
-- Android has not throttled scans.
-
-Android may return previously cached results rather than a fresh scan.
-
-### No BLE records
-
-Check that:
-
-- Bluetooth is enabled.
-- Bluetooth scan permission is granted.
-- The device is transmitting BLE advertisements.
-- The phone permits BLE scanning while the foreground service is running.
-
-BLE scanning reports advertisements rather than a complete inventory of nearby devices. A device may randomize its address, omit a name, or advertise intermittently.
-
-### No Bluetooth records
-
-Check that:
-
-- Bluetooth is enabled.
-- Bluetooth scan/connect permissions are granted.
-- Nearby devices are discoverable through classic Bluetooth discovery.
-
-Many modern Bluetooth Low Energy devices are not reported by classic discovery. Supporting BLE advertisements requires a separate `BluetoothLeScanner` implementation.
-
-### Location is missing
-
-The recorder waits for a usable location fix. Indoor devices may take time to obtain a fix. The recording cycle is not written until a location is available.
-
-## Extending the project
-
-Potential next additions include:
-
-- BLE advertisement scanning with service UUIDs and manufacturer data.
-- An in-app file browser/export action using the Android Storage Access Framework.
-- CSV export.
-- A map view of recorded observations.
-- Per-session output files.
-- A setting for the scan interval.
-- A database-backed storage layer for very large recordings.
+Measurement timestamp references: [Wi-Fi ScanResult.timestamp](https://developer.android.com/reference/android/net/wifi/ScanResult#timestamp), [BLE ScanResult.getTimestampNanos](https://developer.android.com/reference/android/bluetooth/le/ScanResult#getTimestampNanos()), and [Location.getElapsedRealtimeNanos](https://developer.android.com/reference/android/location/Location#getElapsedRealtimeNanos()).

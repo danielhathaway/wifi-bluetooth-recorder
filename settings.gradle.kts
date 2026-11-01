@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "WifiBluetoothRecorder"
+rootProject.name = "PocketDriver"
 include(":app")

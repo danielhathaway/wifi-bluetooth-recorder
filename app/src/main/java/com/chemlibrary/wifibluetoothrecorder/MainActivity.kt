@@ -1,189 +1,98 @@
 package com.example.wifibluetoothrecorder
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.view.MotionEvent
+import android.os.Handler
+import android.os.Looper
 import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.widget.NestedScrollView
+import java.util.Locale
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var statusText: TextView
-    private lateinit var startButton: Button
-    private lateinit var stopButton: Button
-    private lateinit var bleDevicesText: TextView
-    private lateinit var bleScrollView: NestedScrollView
-    private lateinit var fileText: TextView
-    private lateinit var exportButton: Button
-
-    private val bleReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
-            if (intent.action != RecordingService.ACTION_BLE_UPDATE) return
-            val devices = intent.getStringExtra(RecordingService.EXTRA_BLE_DEVICES).orEmpty()
-            bleDevicesText.text = if (devices.isBlank()) {
-                "No BLE advertisements seen yet."
-            } else {
-                devices
+    private val worker = Executors.newSingleThreadExecutor()
+    private val handler = Handler(Looper.getMainLooper())
+    private lateinit var status: TextView
+    private lateinit var stats: TextView
+    private lateinit var start: Button
+    private lateinit var stop: Button
+    private var lastRecording: Recording? = null
+    private var resumed = false
+    private val refresh = object : Runnable {
+        override fun run() {
+            if (!resumed) return
+            render()
+            worker.execute {
+                try {
+                    val latest = RecordingStore.get(this@MainActivity).recordings().firstOrNull()
+                    runOnUiThread { lastRecording = latest; render() }
+                } catch (e: Exception) { runOnUiThread { status.text = "Storage unavailable: ${e.message}" } }
             }
+            handler.postDelayed(this, 1000)
         }
     }
-
-    private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-            val locationGranted =
-                result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-
-            val bluetoothGranted =
-                Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                result[Manifest.permission.BLUETOOTH_SCAN] == true
-
-            if (locationGranted && bluetoothGranted) {
-                startRecordingService()
-            } else {
-                statusText.text = "Required permissions were not granted."
-            }
+    private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (canRecord()) begin() else status.text = "Precise location and Bluetooth permissions are required to record."
+    }
+    private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) worker.execute {
+            try {
+                val output = contentResolver.openOutputStream(uri) ?: error("Cannot open destination")
+                output.bufferedWriter(Charsets.UTF_8).use { RecordingStore.get(this).export(it) }
+                runOnUiThread { android.widget.Toast.makeText(this, "Database exported", android.widget.Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) { runOnUiThread { android.widget.Toast.makeText(this, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show() } }
         }
-
-    private val exportLauncher =
-        registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
-            if (uri != null) {
-                try {
-                    val srcFile = RecordingService.getOutputFile(this)
-                    if (srcFile.exists() && srcFile.length() > 0) {
-                        contentResolver.openOutputStream(uri)?.use { output ->
-                            srcFile.inputStream().use { input ->
-                                input.copyTo(output)
-                            }
-                        }
-                        Toast.makeText(this, "Recording exported successfully!", Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(this, "No recording data found to export yet.", Toast.LENGTH_SHORT).show()
-                    }
-                } catch (e: Exception) {
-                    Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-
-    @SuppressLint("ClickableViewAccessibility")
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        statusText = findViewById(R.id.statusText)
-        startButton = findViewById(R.id.startButton)
-        stopButton = findViewById(R.id.stopButton)
-        bleDevicesText = findViewById(R.id.bleDevicesText)
-        bleScrollView = findViewById(R.id.bleScrollView)
-        fileText = findViewById(R.id.fileText)
-        exportButton = findViewById(R.id.exportButton)
-
-        // Ensure scrolling inside the BLE list container doesn't get intercepted by the outer ScrollView
-        bleScrollView.setOnTouchListener { v, event ->
-            v.parent.requestDisallowInterceptTouchEvent(true)
-            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                v.parent.requestDisallowInterceptTouchEvent(false)
-            }
-            false
+        fitSystemBars()
+        status = findViewById(R.id.statusText)
+        stats = findViewById(R.id.statsText)
+        start = findViewById(R.id.startButton)
+        stop = findViewById(R.id.stopButton)
+        start.setOnClickListener {
+            val needed = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            if(Build.VERSION.SDK_INT >= 31) needed += listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+            if(Build.VERSION.SDK_INT >= 33) needed += Manifest.permission.POST_NOTIFICATIONS
+            val missing = needed.filter { ContextCompat.checkSelfPermission(this,it) != PackageManager.PERMISSION_GRANTED }
+            if(missing.isEmpty()) begin() else permissions.launch(missing.toTypedArray())
         }
-
-        updateFilePathDisplay()
-
-        startButton.setOnClickListener { requestPermissionsAndStart() }
-        stopButton.setOnClickListener { stopRecordingService() }
-        exportButton.setOnClickListener {
-            exportLauncher.launch("network-records.jsonl")
-        }
-
-        updateButtons(RecordingService.isRunning)
+        stop.setOnClickListener { stopService(Intent(this, RecordingService::class.java)); render() }
+        findViewById<Button>(R.id.exportButton).setOnClickListener { export.launch("PocketDriver-database.csv") }
+        findViewById<Button>(R.id.historyButton).setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }
     }
-
-    override fun onStart() {
-        super.onStart()
-        val filter = android.content.IntentFilter(RecordingService.ACTION_BLE_UPDATE)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(bleReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(bleReceiver, filter)
+    private fun canRecord(): Boolean = ContextCompat.checkSelfPermission(this,Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
+        (Build.VERSION.SDK_INT < 31 || listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT).all {
+            ContextCompat.checkSelfPermission(this,it) == PackageManager.PERMISSION_GRANTED })
+    private fun begin() {
+        if (!canRecord()) return
+        if (!androidx.core.location.LocationManagerCompat.isLocationEnabled(getSystemService(android.location.LocationManager::class.java))) {
+            status.text = "Enable device location services before recording."; return
         }
+        try { ContextCompat.startForegroundService(this,Intent(this,RecordingService::class.java)); start.isEnabled=false }
+        catch(e: Exception) { status.text="Unable to start: ${e.message}" }
     }
-
-    override fun onStop() {
-        try {
-            unregisterReceiver(bleReceiver)
-        } catch (_: Exception) {
-        }
-        super.onStop()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        updateFilePathDisplay()
-        updateButtons(RecordingService.isRunning)
-    }
-
-    private fun updateFilePathDisplay() {
-        val file = RecordingService.getOutputFile(this)
-        fileText.text = "Record file:\n${file.absolutePath}"
-    }
-
-    private fun requestPermissionsAndStart() {
-        val permissions = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
-            permissions += Manifest.permission.WRITE_EXTERNAL_STORAGE
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions += Manifest.permission.BLUETOOTH_SCAN
-            permissions += Manifest.permission.BLUETOOTH_CONNECT
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions += Manifest.permission.POST_NOTIFICATIONS
-            permissions += Manifest.permission.NEARBY_WIFI_DEVICES
-        }
-
-        val missing = permissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (missing.isEmpty()) {
-            startRecordingService()
-        } else {
-            permissionLauncher.launch(missing.toTypedArray())
+    private fun render() {
+        val running = RecordingService.isRunning
+        val saving = !running && RecordingService.currentId != null
+        start.isEnabled = !running && !saving
+        stop.isEnabled = running
+        status.text = RecordingService.error ?: if(running) "Recording" else if(saving) "Finishing recording…" else "Stopped"
+        val r = lastRecording
+        stats.text = if(r == null) "Elapsed: 00:00:00\nBluetooth records: 0\nWi-Fi networks scanned: 0\nDistance: 0 m" else {
+            val seconds = r.elapsed(System.currentTimeMillis())
+            String.format(Locale.getDefault(), "Elapsed: %02d:%02d:%02d\nBluetooth records: %d\nWi-Fi networks scanned: %d\nDistance: %.0f m",
+                seconds/3600, seconds/60%60, seconds%60, r.bluetooth,r.wifi,r.distance)
         }
     }
-
-    private fun startRecordingService() {
-        val intent = Intent(this, RecordingService::class.java)
-        ContextCompat.startForegroundService(this, intent)
-        updateButtons(true)
-        updateFilePathDisplay()
-    }
-
-    private fun stopRecordingService() {
-        stopService(Intent(this, RecordingService::class.java))
-        updateButtons(false)
-        updateFilePathDisplay()
-    }
-
-    private fun updateButtons(running: Boolean) {
-        statusText.text = if (running) "Recording..." else "Stopped"
-        startButton.isEnabled = !running
-        stopButton.isEnabled = running
-    }
+    override fun onResume() { super.onResume(); resumed=true; handler.post(refresh) }
+    override fun onPause() { resumed=false; handler.removeCallbacks(refresh); super.onPause() }
+    override fun onDestroy() { worker.shutdown(); super.onDestroy() }
 }

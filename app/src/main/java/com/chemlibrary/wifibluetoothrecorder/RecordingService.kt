@@ -18,12 +18,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.location.Location
 import android.net.wifi.ScanResult as WifiScanResult
 import android.net.wifi.WifiManager
 import android.os.Build
-import android.os.Environment
 import android.os.IBinder
+import android.os.SystemClock
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -32,9 +31,6 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import java.io.File
-import java.time.Instant
-import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -48,85 +44,53 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1001
         private const val INTERVAL_SECONDS = 5L
-        const val ACTION_BLE_UPDATE = "com.example.wifibluetoothrecorder.BLE_UPDATE"
-        const val EXTRA_BLE_DEVICES = "ble_devices"
-
-        fun getOutputFile(context: Context): File {
-            val candidates = mutableListOf<File>()
-
-            // 1. Documents directory in shared storage (/storage/emulated/0/Documents/WifiBluetoothRecorder)
-            try {
-                val docsDir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                    "WifiBluetoothRecorder"
-                )
-                candidates += docsDir
-            } catch (_: Exception) {
-            }
-
-            // 2. Download directory in shared storage (/storage/emulated/0/Download/WifiBluetoothRecorder)
-            try {
-                val downloadDir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "WifiBluetoothRecorder"
-                )
-                candidates += downloadDir
-            } catch (_: Exception) {
-            }
-
-            // 3. Direct folder in root external storage (/storage/emulated/0/WifiBluetoothRecorder)
-            try {
-                @Suppress("DEPRECATION")
-                val rootDir = File(Environment.getExternalStorageDirectory(), "WifiBluetoothRecorder")
-                candidates += rootDir
-            } catch (_: Exception) {
-            }
-
-            for (dir in candidates) {
-                try {
-                    if (!dir.exists()) {
-                        dir.mkdirs()
-                    }
-                    if (dir.exists() && dir.canWrite()) {
-                        val file = File(dir, "network-records.jsonl")
-                        if (!file.exists()) {
-                            file.createNewFile()
-                        }
-                        if (file.canWrite()) {
-                            return file
-                        }
-                    }
-                } catch (_: Exception) {
-                }
-            }
-
-            // Fallback: app-specific external files directory
-            val fallbackDir = context.getExternalFilesDir(null) ?: context.filesDir
-            val fallbackFile = File(fallbackDir, "network-records.jsonl")
-            fallbackFile.parentFile?.mkdirs()
-            return fallbackFile
-        }
+        @Volatile var currentId: Long? = null
+        @Volatile var error: String? = null
     }
 
-    private val latestBle = linkedMapOf<String, BleDeviceState>()
-    private data class BleDeviceState(
-        val name: String,
-        val address: String,
-        var rssi: Int,
-        var lastSeen: Long
-    )
+    private val writer = Executors.newSingleThreadScheduledExecutor()
+    private val signalBuffer = SignalLocationBuffer(MeasurementClock(SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis()))
+    private var acceptingWrites = true
+    @Volatile private var active = false
+    private var store: RecordingStore? = null
+    private var recordingId: Long? = null // Accessed only on writer.
+    private var distance = 0.0
+    private var previousLocation: TimedLocation? = null
+    @Volatile private var bleStarted = false
+    private val seenWifi = WifiObservationCache()
+    private val mainHandler = android.os.Handler(Looper.getMainLooper())
+
+    private fun write(block: (RecordingStore, Long) -> Unit) {
+        synchronized(writer) {
+            if (!active || !acceptingWrites) return
+            writer.execute {
+                val id = recordingId ?: return@execute
+                try { block(store ?: return@execute, id) }
+                catch (e: Exception) { fail("Unable to save recording: ${e.message}") }
+            }
+        }
+    }
+    private fun fail(message: String) {
+        error = message
+        mainHandler.post { stopSelf() }
+    }
 
     private lateinit var wifiManager: WifiManager
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var bleScanner: BluetoothLeScanner? = null
     private val fusedLocation by lazy { LocationServices.getFusedLocationProviderClient(this) }
 
-    private var latestLocation: Location? = null
     private var scheduler: ScheduledExecutorService? = null
-    private lateinit var outputFile: File
 
     private val bluetoothReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) != BluetoothAdapter.STATE_ON) {
+                    bleStarted = false
+                    bleScanner = null
+                }
+                return
+            }
             if (intent.action != BluetoothDevice.ACTION_FOUND) return
             val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
@@ -135,10 +99,11 @@ class RecordingService : Service() {
                 intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
             } ?: return
 
-            recordBluetooth(device)
+            recordBluetooth(device, intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE).let { if (it == Short.MIN_VALUE) null else it.toInt() })
         }
     }
 
+    @SuppressLint("MissingPermission") // Checked at runtime; revocations are also caught below.
     private val wifiReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == WifiManager.SCAN_RESULTS_AVAILABLE_ACTION) {
@@ -157,21 +122,43 @@ class RecordingService : Service() {
 
     private val bleScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: BleScanResult) {
-            recordBleAdvertisement(result)
+            try { recordBleAdvertisement(result) } catch (_: SecurityException) { }
         }
 
         override fun onBatchScanResults(results: MutableList<BleScanResult>) {
-            results.forEach { recordBleAdvertisement(it) }
+            results.forEach { try { recordBleAdvertisement(it) } catch (_: SecurityException) { } }
         }
 
         override fun onScanFailed(errorCode: Int) {
-            // Android may throttle or reject BLE scans. Other recording continues.
+            // Retry on a later cycle if Android rejected the scan. Other recording continues.
+            bleStarted = false
         }
     }
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            latestLocation = result.lastLocation
+            if (!active) return
+            val locations = result.locations.filter { it.hasAccuracy() }.map { location ->
+                TimedLocation(location.elapsedRealtimeNanos, location.time, location.latitude,
+                    location.longitude, location.accuracy.toDouble())
+            }.sortedBy { it.elapsedNanos }
+            write { database, id ->
+                val rows = mutableListOf<Observation>()
+                locations.forEach { location ->
+                    if (!signalBuffer.addLocation(location)) return@forEach
+                    val old = previousLocation
+                    if (old == null || location.elapsedNanos > old.elapsedNanos) {
+                        if (old != null) distance += RecordFormat.distance(
+                            TrackPoint(old.latitude, old.longitude), TrackPoint(location.latitude, location.longitude))
+                        previousLocation = location
+                    }
+                    rows += Observation(location.timeMillis, "location", latitude=location.latitude, longitude=location.longitude,
+                        data=org.json.JSONObject().put("accuracy_m", location.accuracyMeters)
+                            .put("elapsed_realtime_ns", location.elapsedNanos).toString())
+                }
+                if (rows.isNotEmpty()) database.append(id, rows, distance)
+                flushSignals(database, id)
+            }
         }
     }
 
@@ -181,15 +168,13 @@ class RecordingService : Service() {
         wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
         val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         bluetoothAdapter = btManager?.adapter ?: @Suppress("DEPRECATION") BluetoothAdapter.getDefaultAdapter()
-        bleScanner = bluetoothAdapter?.bluetoothLeScanner
 
         createNotificationChannel()
-        outputFile = getOutputFile(this)
 
         ContextCompat.registerReceiver(
             this,
             bluetoothReceiver,
-            IntentFilter(BluetoothDevice.ACTION_FOUND),
+            IntentFilter(BluetoothDevice.ACTION_FOUND).apply { addAction(BluetoothAdapter.ACTION_STATE_CHANGED) },
             ContextCompat.RECEIVER_EXPORTED
         )
 
@@ -202,6 +187,8 @@ class RecordingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (isRunning) return START_NOT_STICKY
+        error = null
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
@@ -213,9 +200,24 @@ class RecordingService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         isRunning = true
+        active = true
 
-        startLocationUpdates()
-        startPeriodicScans()
+        writer.execute {
+            try {
+                store = RecordingStore.get(this)
+                recordingId = store!!.start()
+                currentId = recordingId
+                synchronized(writer) {
+                    if (acceptingWrites) writer.scheduleWithFixedDelay({
+                        try { recordingId?.let { id -> store?.let { flushSignals(it, id) } } }
+                        catch (e: Exception) { fail("Unable to save recording: ${e.message}") }
+                    }, 1, 1, TimeUnit.SECONDS)
+                }
+                mainHandler.post {
+                    if (active) { startLocationUpdates(); startPeriodicScans() }
+                }
+            } catch (e: Exception) { fail("Cannot open encrypted database: ${e.message}") }
+        }
 
         return START_NOT_STICKY
     }
@@ -224,7 +226,7 @@ class RecordingService : Service() {
         if (scheduler != null) return
 
         scheduler = Executors.newSingleThreadScheduledExecutor().also { executor ->
-            executor.scheduleAtFixedRate(
+            executor.scheduleWithFixedDelay(
                 { performScanCycle() },
                 0,
                 INTERVAL_SECONDS,
@@ -235,7 +237,7 @@ class RecordingService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun performScanCycle() {
-        if (!isRunning) return
+        if (!active) return
 
         // Wi-Fi scans can be throttled by Android. The latest available results
         // are recorded every cycle, and a new scan is requested where possible.
@@ -256,153 +258,101 @@ class RecordingService : Service() {
         try {
             val adapter = bluetoothAdapter
             if (adapter != null && hasBluetoothScanPermission() && adapter.isEnabled) {
-                if (adapter.isDiscovering) adapter.cancelDiscovery()
-                adapter.startDiscovery()
+                if (!adapter.isDiscovering) adapter.startDiscovery()
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        // Scan for BLE advertisements for most of each five-second cycle.
+        // Keep one BLE scan active: repeated stop/start cycles trigger Android throttling.
         try {
             val adapter = bluetoothAdapter
-            if (adapter != null && hasBluetoothScanPermission() && adapter.isEnabled) {
+            if (!bleStarted && adapter != null && hasBluetoothScanPermission() && adapter.isEnabled) {
                 bleScanner = adapter.bluetoothLeScanner
-                bleScanner?.startScan(bleScanCallback)
-                scheduler?.schedule({
-                    try {
-                        bleScanner?.stopScan(bleScanCallback)
-                    } catch (_: SecurityException) {
-                    }
-                }, 4, TimeUnit.SECONDS)
+                bleScanner?.let { it.startScan(bleScanCallback); bleStarted = true }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (_: SecurityException) { }
+    }
+
+    private fun signal(type: String, transport: String = "", data: org.json.JSONObject,
+        measuredNanos: Long?, source: String): PendingSignal = PendingSignal(
+        type, transport, data.toString(), measuredNanos, SystemClock.elapsedRealtimeNanos(),
+        System.currentTimeMillis(), source)
+
+    private fun enqueueSignals(signals: List<PendingSignal>) {
+        if (signals.isEmpty()) return
+        write { database, id ->
+            signals.forEach { signalBuffer.add(it) }
+            flushSignals(database, id)
         }
+    }
+
+    private fun flushSignals(database: RecordingStore, id: Long, force: Boolean = false) {
+        val rows = signalBuffer.drain(SystemClock.elapsedRealtimeNanos(), force).map { located ->
+            located.toObservation()
+        }
+        if (rows.isNotEmpty()) database.append(id, rows)
     }
 
     @SuppressLint("MissingPermission")
     private fun recordWifiResults(results: List<WifiScanResult>) {
-        val location = latestLocation
-
-        for (result in results) {
-            val security = wifiSecurity(result)
-            val channel = frequencyToChannel(result.frequency)
-            val mode = "unknown"
-            @Suppress("DEPRECATION")
-            val rate = result.channelWidth.toString()
-
-            appendJson(
-                """
-                {"type":"wifi","location":"${locationString(location)}","time":"${Instant.now()}","data":{"bssid":"${jsonEscape(result.BSSID ?: "")}","ssid":"${jsonEscape(result.SSID ?: "")}","mode":"$mode","chan":$channel,"rate":"${jsonEscape(rate)}","signal":${result.level},"security":"${jsonEscape(security)}"}}
-                """.trimIndent()
-            )
+        // Android often broadcasts cached results as well as returning them during the polling cycle.
+        // Persist a BSSID/timestamp pair only once per recording.
+        val rows = synchronized(seenWifi) {
+            results.filter { result ->
+                seenWifi.accept(result.BSSID ?: "", result.timestamp)
+            }.map { result ->
+                @Suppress("DEPRECATION")
+                signal("wifi", data=org.json.JSONObject().put("bssid", result.BSSID).put("ssid", result.SSID)
+                    .put("scan_timestamp_us", result.timestamp)
+                    .put("mode", "unknown").put("chan", RadioFields.frequencyToChannel(result.frequency))
+                    .put("channel_width", result.channelWidth).put("signal", result.level).put("security", RadioFields.security(result.capabilities ?: "")),
+                    measuredNanos=MeasurementClock.wifiNanos(result.timestamp), source="wifi_scan")
+            }
         }
+        enqueueSignals(rows)
     }
 
     @SuppressLint("MissingPermission")
     private fun recordBleAdvertisement(result: BleScanResult) {
-        val location = latestLocation
         val record = result.scanRecord
-        val name = record?.deviceName ?: try { result.device?.name ?: "" } catch (_: SecurityException) { "" }
-        val address = try { result.device?.address ?: "" } catch (_: SecurityException) { "" }
-        val txPower = if (result.txPower == Int.MIN_VALUE) null else result.txPower
-
-        val manufacturers = mutableListOf<String>()
+        val manufacturers = org.json.JSONObject()
         record?.manufacturerSpecificData?.let { data ->
-            for (i in 0 until data.size()) {
-                manufacturers += "\"${data.keyAt(i)}\":\"${data.valueAt(i).toHex()}\""
-            }
+            for (i in 0 until data.size()) manufacturers.put(data.keyAt(i).toString(), data.valueAt(i).toHex())
         }
-
-        val serviceUuids = record?.serviceUuids?.map { it.uuid.toString() } ?: emptyList()
-
-        val serviceData = mutableListOf<String>()
-        record?.serviceData?.let { data ->
-            for ((uuid, bytes) in data) {
-                serviceData += "\"${uuid.uuid}\":\"${bytes.toHex()}\""
-            }
-        }
-
-        val json = """{"type":"bluetooth_le","location":"${locationString(location)}","time":"${Instant.now()}","data":{"name":"${jsonEscape(name)}","mac":"${jsonEscape(address)}","rssi":${result.rssi},"tx_power":${txPower ?: "null"},"manufacturer_data":{${manufacturers.joinToString(",")}},"service_uuids":[${serviceUuids.joinToString(",") { "\"${jsonEscape(it)}\"" }}],"service_data":{${serviceData.joinToString(",")}}}}"""
-        appendJson(json)
-        updateBleUi(name, address, result.rssi)
-    }
-
-    private fun updateBleUi(name: String, address: String, rssi: Int) {
-        val key = if (address.isBlank()) name else address
-        if (key.isBlank()) return
-
-        synchronized(latestBle) {
-            latestBle[key] = BleDeviceState(
-                name = name.ifBlank { "(unnamed BLE device)" },
-                address = address.ifBlank { "address unavailable" },
-                rssi = rssi,
-                lastSeen = System.currentTimeMillis()
-            )
-
-            // Keep the live list bounded.
-            while (latestBle.size > 100) {
-                latestBle.remove(latestBle.keys.first())
-            }
-
-            val text = latestBle.values
-                .sortedByDescending { it.rssi }
-                .joinToString("\n") {
-                    "${it.name}  |  ${it.address}  |  ${it.rssi} dBm"
-                }
-
-            sendBroadcast(Intent(ACTION_BLE_UPDATE).apply {
-                setPackage(packageName)
-                putExtra(EXTRA_BLE_DEVICES, text)
-            })
-        }
+        val services = org.json.JSONObject()
+        record?.serviceData?.forEach { (uuid, bytes) -> services.put(uuid.uuid.toString(), bytes.toHex()) }
+        val data = org.json.JSONObject().put("name", record?.deviceName ?: safeName(result.device))
+            .put("mac", result.device.address).put("rssi", result.rssi)
+            .put("tx_power", if(result.txPower == Int.MIN_VALUE) org.json.JSONObject.NULL else result.txPower)
+            .put("manufacturer_data", manufacturers)
+            .put("service_uuids", org.json.JSONArray(record?.serviceUuids?.map { it.uuid.toString() } ?: emptyList<String>()))
+            .put("service_data", services)
+        data.put("scan_timestamp_ns", result.timestampNanos)
+        enqueueSignals(listOf(signal("bluetooth", "le", data, result.timestampNanos, "ble_scan")))
     }
 
     @SuppressLint("MissingPermission")
-    private fun recordBluetooth(device: BluetoothDevice) {
+    private fun safeName(device: BluetoothDevice): String = try { device.name ?: "" } catch (_: SecurityException) { "" }
+
+    @SuppressLint("MissingPermission")
+    private fun recordBluetooth(device: BluetoothDevice, rssi: Int?) {
         if (!hasBluetoothConnectPermission()) return
-        val location = latestLocation
-
-        val name = try { device.name ?: "" } catch (_: SecurityException) { "" }
-        val address = try { device.address ?: "" } catch (_: SecurityException) { "" }
-        val clazz = try { device.bluetoothClass?.deviceClass?.toString() ?: "" } catch (_: SecurityException) { "" }
-
-        appendJson(
-            """
-            {"type":"bluetooth","location":"${locationString(location)}","time":"${Instant.now()}","data":{"name":"${jsonEscape(name)}","mac":"${jsonEscape(address)}","class":"${jsonEscape(clazz)}"}}
-            """.trimIndent()
-        )
-    }
-
-    private fun appendJson(line: String) {
-        synchronized(outputFile) {
-            try {
-                outputFile.parentFile?.mkdirs()
-                outputFile.appendText(line + "\n", Charsets.UTF_8)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
+        val data = org.json.JSONObject().put("name", safeName(device)).put("mac", device.address)
+            .put("class", device.bluetoothClass?.deviceClass ?: org.json.JSONObject.NULL)
+            .put("rssi", rssi ?: org.json.JSONObject.NULL)
+        // ACTION_FOUND has no hardware measurement timestamp. Do not invent a measurement location.
+        enqueueSignals(listOf(signal("bluetooth", "classic", data, null, "unavailable")))
     }
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
         if (!hasLocationPermission()) return
 
-        try {
-            fusedLocation.lastLocation.addOnSuccessListener { location ->
-                if (location != null && latestLocation == null) {
-                    latestLocation = location
-                }
-            }
-        } catch (_: SecurityException) {
-        }
-
         val request = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
-            5_000L
-        ).setMinUpdateIntervalMillis(2_000L).build()
+            1_000L
+        ).setMinUpdateIntervalMillis(500L).build()
 
         try {
             fusedLocation.requestLocationUpdates(
@@ -442,41 +392,7 @@ class RecordingService : Service() {
             Manifest.permission.BLUETOOTH_CONNECT
         ) == PackageManager.PERMISSION_GRANTED
 
-    private fun wifiSecurity(result: WifiScanResult): String {
-        val caps = result.capabilities?.uppercase(Locale.US) ?: ""
-        return when {
-            "WPA3" in caps -> "WPA3"
-            "WPA2" in caps -> "WPA2"
-            "WPA" in caps -> "WPA"
-            "WEP" in caps -> "WEP"
-            else -> "OPEN"
-        }
-    }
-
-    private fun frequencyToChannel(frequency: Int): Int {
-        return when {
-            frequency in 2412..2484 -> if (frequency == 2484) 14 else (frequency - 2407) / 5
-            frequency in 5000..5895 -> (frequency - 5000) / 5
-            frequency in 5955..7115 -> (frequency - 5950) / 5
-            else -> 0
-        }
-    }
-
-    private fun locationString(location: Location?): String =
-        if (location != null) {
-            String.format(Locale.US, "%.7f,%.7f", location.latitude, location.longitude)
-        } else {
-            ""
-        }
-
-    private fun ByteArray.toHex(): String =
-        joinToString("") { "%02x".format(it.toInt() and 0xff) }
-
-    private fun jsonEscape(value: String): String =
-        value.replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     private fun createNotificationChannel() {
         val manager = getSystemService(NotificationManager::class.java)
@@ -499,16 +415,31 @@ class RecordingService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Network recording active")
+            .setContentTitle("PocketDriver recording")
             .setContentText("Scanning Wi-Fi and Bluetooth approximately every 5 seconds")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .build()
     }
 
+    @SuppressLint("MissingPermission") // Radio shutdown is best-effort after permission revocation.
     override fun onDestroy() {
+        active = false
         isRunning = false
+        // Drain accepted writes before closing the session. No whole-recording final save.
+        synchronized(writer) {
+            acceptingWrites = false
+            writer.execute {
+                try { recordingId?.let { id -> store?.let { database ->
+                    flushSignals(database, id, force=true)
+                    database.finish(id)
+                } } }
+                catch (e: Exception) { error = "Unable to finish recording: ${e.message}" }
+                finally { if (currentId == recordingId) currentId = null }
+            }
+            writer.shutdown()
+        }
         scheduler?.shutdownNow()
         scheduler = null
 

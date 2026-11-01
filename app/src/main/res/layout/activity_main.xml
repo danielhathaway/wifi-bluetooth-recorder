@@ -1,89 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp">
-
-        <TextView
-            android:id="@+id/titleText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Wi-Fi &amp; Bluetooth Recorder"
-            android:textAppearance="?attr/textAppearanceHeadlineSmall"
-            android:layout_marginBottom="16dp" />
-
-        <TextView
-            android:id="@+id/statusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Stopped"
-            android:textAppearance="?attr/textAppearanceBodyLarge"
-            android:layout_marginBottom="12dp" />
-
-        <Button
-            android:id="@+id/startButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Start recording"
-            android:layout_marginBottom="8dp" />
-
-        <Button
-            android:id="@+id/stopButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Stop recording"
-            android:enabled="false"
-            android:layout_marginBottom="20dp" />
-
-        <TextView
-            android:id="@+id/fileText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Record file: shared external storage"
-            android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:layout_marginBottom="8dp" />
-
-        <Button
-            android:id="@+id/exportButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Export recording file"
-            android:layout_marginBottom="20dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Nearby BLE devices"
-            android:textAppearance="?attr/textAppearanceTitleMedium"
-            android:layout_marginBottom="8dp" />
-
-        <androidx.core.widget.NestedScrollView
-            android:id="@+id/bleScrollView"
-            android:layout_width="match_parent"
-            android:layout_height="200dp"
-            android:background="#F2F2F2"
-            android:layout_marginBottom="20dp">
-
-            <TextView
-                android:id="@+id/bleDevicesText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="No BLE advertisements seen yet."
-                android:fontFamily="monospace"
-                android:padding="12dp" />
-        </androidx.core.widget.NestedScrollView>
-
-        <TextView
-            android:id="@+id/noteText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="A foreground service records GPS, Wi-Fi scan results, and Bluetooth discovery results approximately every 5 seconds. Android and device firmware may throttle scans or omit fields."
-            android:textAppearance="?attr/textAppearanceBodySmall" />
-
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="PocketDriver" android:textAppearance="?attr/textAppearanceHeadlineLarge" android:layout_marginBottom="16dp" />
+        <TextView android:id="@+id/statusText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Stopped" android:textAppearance="?attr/textAppearanceTitleMedium" android:layout_marginBottom="16dp" />
+        <Button android:id="@+id/startButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Start recording" />
+        <Button android:id="@+id/stopButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Stop recording" android:enabled="false" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Scan summary" android:textAppearance="?attr/textAppearanceTitleLarge" android:layout_marginTop="24dp" />
+        <TextView android:id="@+id/statsText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Elapsed: 00:00:00\nBluetooth records: 0\nWi-Fi networks scanned: 0\nDistance: 0 m" android:textAppearance="?attr/textAppearanceBodyLarge" android:paddingTop="12dp" android:paddingBottom="24dp" android:accessibilityLiveRegion="polite" />
+        <Button android:id="@+id/historyButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Previous recordings &amp; maps" />
+        <Button android:id="@+id/exportButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Export entire database as CSV" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="16dp" android:text="Observations are saved continuously to an encrypted database on this device. CSV exports are unencrypted. Wi-Fi counts are fresh observations, including repeat sightings in later scans. Bluetooth includes classic discovery and BLE advertisements. Wi-Fi and BLE locations are matched to measurement time; unavailable matches have no coordinates. Distance is estimated from location fixes. Android may throttle scans." android:textAppearance="?attr/textAppearanceBodySmall" />
     </LinearLayout>
 </ScrollView>
