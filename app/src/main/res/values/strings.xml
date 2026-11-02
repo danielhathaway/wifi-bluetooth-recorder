@@ -91,4 +91,19 @@
     <string name="gps_fix">GPS location</string>
     <string name="group_observations">%1$s observations · Last seen %2$s</string>
     <string name="group_map_accessibility">%1$s. %2$s. %3$s. %4$s. View locations on map.</string>
+    <string name="database_size_label">Database on disk</string>
+    <string name="database_size_accessibility">Database size on disk: %1$s</string>
+    <string name="database_size_loading">Calculating…</string>
+    <string name="manage_storage">Manage app storage</string>
+    <string name="erase_app_data">Erase all app data</string>
+    <string name="erase_title">Erase all recordings and app data?</string>
+    <string name="erase_message">This permanently removes every recording, database encryption keys, cached maps, preferences, and temporary files in app storage. Recording will stop and PocketDriver will close. Android permissions will reset.
+
+CSV exports and legacy files saved outside app storage are not deleted.
+
+This cannot be undone.</string>
+    <string name="erase_confirm">Erase everything</string>
+    <string name="cancel">Cancel</string>
+    <string name="status_erasing">Erasing</string>
+    <string name="erase_failed">Android could not clear app data. Your recordings have not been erased.</string>
 </resources>

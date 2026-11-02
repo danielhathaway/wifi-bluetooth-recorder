@@ -11,6 +11,8 @@ import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.PopupMenu
+import android.text.format.Formatter
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -20,6 +22,7 @@ import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
+    private val exports = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var status: TextView
     private lateinit var elapsed: TextView
@@ -34,20 +37,24 @@ class MainActivity : AppCompatActivity() {
     private var stopping = false
     private var issue: String? = null
     private var storageIssue: String? = null
+    private var databaseBytes: Long? = null
+    @Volatile private var erasing = false
 
     private val refresh = object : Runnable {
         override fun run() {
-            if (!resumed) return
+            if (!resumed || erasing) return
             render()
             worker.execute {
+                if(erasing) return@execute
+                val size = DatabaseFiles.sizeBytes(getDatabasePath(DatabaseFiles.NAME))
                 try {
                     val latest = RecordingStore.get(this@MainActivity).recordings().firstOrNull()
                     runOnUiThread {
-                        if (!isDestroyed) { lastRecording = latest; storageIssue = null; render() }
+                        if (!isDestroyed && !erasing) { lastRecording = latest; databaseBytes = size; storageIssue = null; render() }
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
-                        if (!isDestroyed) { storageIssue = getString(R.string.storage_error, e.message); render() }
+                        if (!isDestroyed && !erasing) { databaseBytes = size; storageIssue = getString(R.string.storage_error, e.message); render() }
                     }
                 }
             }
@@ -58,7 +65,8 @@ class MainActivity : AppCompatActivity() {
         if (canRecord()) begin() else showIssue(getString(R.string.permissions_required))
     }
     private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        if (uri != null) worker.execute {
+        if (uri != null && !erasing) exports.execute {
+            if(erasing) return@execute
             try {
                 val output = contentResolver.openOutputStream(uri) ?: error("Cannot open destination")
                 output.bufferedWriter(Charsets.UTF_8).use { RecordingStore.get(this).export(it) }
@@ -91,6 +99,15 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, HistoryActivity::class.java))
         }
         findViewById<Button>(R.id.exportButton).setOnClickListener { export.launch("PocketDriver-database.csv") }
+        findViewById<View>(R.id.manageStorageButton).setOnClickListener { anchor ->
+            PopupMenu(this,anchor).apply {
+                menu.add(0,R.id.action_erase_data,0,R.string.erase_app_data)
+                setOnMenuItemClickListener { item ->
+                    if(item.itemId == R.id.action_erase_data) { confirmErase(); true } else false
+                }
+                show()
+            }
+        }
         findViewById<View>(R.id.aboutButton).setOnClickListener {
             MaterialAlertDialogBuilder(this).setTitle(R.string.about_title).setMessage(R.string.about_body)
                 .setPositiveButton(R.string.about_action, null).show()
@@ -98,7 +115,35 @@ class MainActivity : AppCompatActivity() {
         render()
     }
 
+    private fun confirmErase() {
+        if(erasing) return
+        val dialog = MaterialAlertDialogBuilder(this).setTitle(R.string.erase_title)
+            .setMessage(R.string.erase_message).setNegativeButton(R.string.cancel,null)
+            .setPositiveButton(R.string.erase_confirm) { _,_ -> eraseAppData() }.create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)
+                .setTextColor(ContextCompat.getColor(this,R.color.app_error))
+        }
+        dialog.show()
+    }
+
+    private fun eraseAppData() {
+        if(erasing) return
+        erasing = true
+        handler.removeCallbacks(refresh)
+        render()
+        // Android stops the whole app before clearing its data, including all open SQLite sidecars.
+        // Do not delete files or keys piecemeal while service/read/export connections may be active.
+        val accepted = try { AppDataReset.request(this) } catch (_: Exception) { false }
+        if(accepted) finishAndRemoveTask() else {
+            erasing = false
+            showIssue(getString(R.string.erase_failed))
+            if(resumed) handler.post(refresh)
+        }
+    }
+
     private fun requestRecordingPermissions() {
+        if(erasing) return
         issue = null
         val needed = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT >= 31) needed += listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -113,6 +158,7 @@ class MainActivity : AppCompatActivity() {
         })
 
     private fun begin() {
+        if(erasing) return
         if (!canRecord()) { showIssue(getString(R.string.permissions_required)); return }
         if (!androidx.core.location.LocationManagerCompat.isLocationEnabled(getSystemService(android.location.LocationManager::class.java))) {
             showIssue(getString(R.string.location_required)); return
@@ -133,12 +179,16 @@ class MainActivity : AppCompatActivity() {
         val running = RecordingService.isRunning && !stopping
         val saving = stopping || (!RecordingService.isRunning && RecordingService.currentId != null)
         val problem = issue ?: storageIssue ?: RecordingService.error
-        start.isEnabled = !running && !saving && !starting
-        stop.isEnabled = running
+        start.isEnabled = !running && !saving && !starting && !erasing
+        stop.isEnabled = running && !erasing
+        listOf(R.id.historyButton,R.id.exportButton,R.id.manageStorageButton).forEach {
+            findViewById<View>(it).isEnabled = !erasing
+        }
         start.alpha = if (start.isEnabled) 1f else 0.5f
         start.visibility = if (running) View.GONE else View.VISIBLE
         stop.visibility = if (running) View.VISIBLE else View.GONE
         status.setText(when {
+            erasing -> R.string.status_erasing
             saving -> R.string.status_saving
             running -> R.string.status_recording
             starting -> R.string.status_starting
@@ -160,6 +210,11 @@ class MainActivity : AppCompatActivity() {
         wifi.text = UiFormat.number(r?.wifi ?: 0)
         bluetooth.text = UiFormat.number(r?.bluetooth ?: 0)
         distance.text = UiFormat.distance(this, r?.distance ?: 0.0)
+        findViewById<TextView>(R.id.databaseSizeValue).apply {
+            text = databaseBytes?.let { Formatter.formatShortFileSize(this@MainActivity,it) }
+                ?: getString(R.string.database_size_loading)
+            contentDescription = getString(R.string.database_size_accessibility,text)
+        }
         elapsed.contentDescription = getString(R.string.elapsed_accessibility, elapsed.text)
         wifi.contentDescription = getString(R.string.wifi_accessibility, wifi.text)
         bluetooth.contentDescription = getString(R.string.bluetooth_accessibility, bluetooth.text)
@@ -168,5 +223,5 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() { super.onResume(); resumed = true; handler.post(refresh) }
     override fun onPause() { resumed = false; handler.removeCallbacks(refresh); super.onPause() }
-    override fun onDestroy() { worker.shutdown(); super.onDestroy() }
+    override fun onDestroy() { worker.shutdown(); exports.shutdown(); super.onDestroy() }
 }

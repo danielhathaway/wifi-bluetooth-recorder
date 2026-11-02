@@ -21,6 +21,8 @@ class ScreenTest {
                 assertTrue(activity.findViewById<TextView>(R.id.bluetoothValue).contentDescription.contains("Bluetooth"))
                 assertTrue(activity.findViewById<TextView>(R.id.distanceValue).contentDescription.isNotBlank())
                 assertTrue(activity.findViewById<View>(R.id.historyButton).isClickable)
+                assertTrue(activity.findViewById<TextView>(R.id.databaseSizeValue).contentDescription.toString().contains("Database size"))
+                assertTrue(activity.findViewById<View>(R.id.manageStorageButton).isEnabled)
                 assertTrue(activity.findViewById<Button>(R.id.exportButton).text.contains("CSV"))
                 assertFalse(activity.findViewById<Button>(R.id.stopButton).isEnabled)
             }

@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanSettings
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult as BleScanResult
 import android.content.BroadcastReceiver
@@ -57,6 +58,7 @@ class RecordingService : Service() {
     private var distance = 0.0
     private var previousLocation: TimedLocation? = null
     @Volatile private var bleStarted = false
+    @Volatile private var legacyBleFallback = false
     private val seenWifi = WifiObservationCache()
     private val mainHandler = android.os.Handler(Looper.getMainLooper())
 
@@ -99,7 +101,7 @@ class RecordingService : Service() {
                 intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
             } ?: return
 
-            recordBluetooth(device, intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE).let { if (it == Short.MIN_VALUE) null else it.toInt() })
+            recordBluetooth(device, intent)
         }
     }
 
@@ -122,15 +124,22 @@ class RecordingService : Service() {
 
     private val bleScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: BleScanResult) {
-            try { recordBleAdvertisement(result) } catch (_: SecurityException) { }
+            val receivedElapsed = SystemClock.elapsedRealtimeNanos()
+            val receivedTime = System.currentTimeMillis()
+            recordBleAdvertisement(result, callbackType, "single", receivedElapsed, receivedTime)
         }
 
         override fun onBatchScanResults(results: MutableList<BleScanResult>) {
-            results.forEach { try { recordBleAdvertisement(it) } catch (_: SecurityException) { } }
+            val receivedElapsed = SystemClock.elapsedRealtimeNanos()
+            val receivedTime = System.currentTimeMillis()
+            results.forEachIndexed { index,result ->
+                recordBleAdvertisement(result, null, "batch", receivedElapsed, receivedTime, index, results.size)
+            }
         }
 
         override fun onScanFailed(errorCode: Int) {
             // Retry on a later cycle if Android rejected the scan. Other recording continues.
+            if(errorCode == ScanCallback.SCAN_FAILED_FEATURE_UNSUPPORTED) legacyBleFallback = true
             bleStarted = false
         }
     }
@@ -269,15 +278,17 @@ class RecordingService : Service() {
             val adapter = bluetoothAdapter
             if (!bleStarted && adapter != null && hasBluetoothScanPermission() && adapter.isEnabled) {
                 bleScanner = adapter.bluetoothLeScanner
-                bleScanner?.let { it.startScan(bleScanCallback); bleStarted = true }
+                val settings = ScanSettings.Builder()
+                    .setLegacy(legacyBleFallback || !adapter.isLeExtendedAdvertisingSupported).build()
+                bleScanner?.let { it.startScan(null, settings, bleScanCallback); bleStarted = true }
             }
         } catch (_: SecurityException) { }
     }
 
     private fun signal(type: String, transport: String = "", data: org.json.JSONObject,
-        measuredNanos: Long?, source: String): PendingSignal = PendingSignal(
-        type, transport, data.toString(), measuredNanos, SystemClock.elapsedRealtimeNanos(),
-        System.currentTimeMillis(), source)
+        measuredNanos: Long?, source: String, receivedElapsed: Long = SystemClock.elapsedRealtimeNanos(),
+        receivedTime: Long = System.currentTimeMillis()): PendingSignal = PendingSignal(
+        type, transport, data.toString(), measuredNanos, receivedElapsed, receivedTime, source)
 
     private fun enqueueSignals(signals: List<PendingSignal>) {
         if (signals.isEmpty()) return
@@ -314,36 +325,18 @@ class RecordingService : Service() {
         enqueueSignals(rows)
     }
 
-    @SuppressLint("MissingPermission")
-    private fun recordBleAdvertisement(result: BleScanResult) {
-        val record = result.scanRecord
-        val manufacturers = org.json.JSONObject()
-        record?.manufacturerSpecificData?.let { data ->
-            for (i in 0 until data.size()) manufacturers.put(data.keyAt(i).toString(), data.valueAt(i).toHex())
-        }
-        val services = org.json.JSONObject()
-        record?.serviceData?.forEach { (uuid, bytes) -> services.put(uuid.uuid.toString(), bytes.toHex()) }
-        val data = org.json.JSONObject().put("name", record?.deviceName ?: safeName(result.device))
-            .put("mac", result.device.address).put("rssi", result.rssi)
-            .put("tx_power", if(result.txPower == Int.MIN_VALUE) org.json.JSONObject.NULL else result.txPower)
-            .put("manufacturer_data", manufacturers)
-            .put("service_uuids", org.json.JSONArray(record?.serviceUuids?.map { it.uuid.toString() } ?: emptyList<String>()))
-            .put("service_data", services)
-        data.put("scan_timestamp_ns", result.timestampNanos)
-        enqueueSignals(listOf(signal("bluetooth", "le", data, result.timestampNanos, "ble_scan")))
+    private fun recordBleAdvertisement(result: BleScanResult, callbackType: Int?, delivery: String,
+        receivedElapsed: Long, receivedTime: Long, batchIndex: Int? = null, batchSize: Int? = null) {
+        val data = BluetoothObservationEncoder.ble(result, callbackType, delivery, batchIndex, batchSize)
+        enqueueSignals(listOf(signal("bluetooth", "le", data, result.timestampNanos, "ble_scan", receivedElapsed, receivedTime)))
     }
 
-    @SuppressLint("MissingPermission")
-    private fun safeName(device: BluetoothDevice): String = try { device.name ?: "" } catch (_: SecurityException) { "" }
-
-    @SuppressLint("MissingPermission")
-    private fun recordBluetooth(device: BluetoothDevice, rssi: Int?) {
-        if (!hasBluetoothConnectPermission()) return
-        val data = org.json.JSONObject().put("name", safeName(device)).put("mac", device.address)
-            .put("class", device.bluetoothClass?.deviceClass ?: org.json.JSONObject.NULL)
-            .put("rssi", rssi ?: org.json.JSONObject.NULL)
-        // ACTION_FOUND has no hardware measurement timestamp. Do not invent a measurement location.
-        enqueueSignals(listOf(signal("bluetooth", "classic", data, null, "unavailable")))
+    private fun recordBluetooth(device: BluetoothDevice, intent: Intent) {
+        val receivedElapsed = SystemClock.elapsedRealtimeNanos()
+        val receivedTime = System.currentTimeMillis()
+        val data = BluetoothObservationEncoder.classic(device, intent)
+        // ACTION_FOUND has no hardware measurement timestamp. The GPS-only policy still applies.
+        enqueueSignals(listOf(signal("bluetooth", "classic", data, null, "unavailable", receivedElapsed, receivedTime)))
     }
 
     @SuppressLint("MissingPermission")
@@ -385,15 +378,6 @@ class RecordingService : Service() {
             this,
             Manifest.permission.BLUETOOTH_SCAN
         ) == PackageManager.PERMISSION_GRANTED
-
-    private fun hasBluetoothConnectPermission(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-        ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.BLUETOOTH_CONNECT
-        ) == PackageManager.PERMISSION_GRANTED
-
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     private fun createNotificationChannel() {
         val manager = getSystemService(NotificationManager::class.java)

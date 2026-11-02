@@ -40,6 +40,33 @@ New radio payloads include `measurement_alignment_version=1`, `measurement_elaps
 
 Existing records with valid coordinates are preserved as recorded. Older rows without `measurement_alignment_version` used processing-time GPS and cannot be corrected automatically.
 
+## Bluetooth capture audit
+
+The scan-data encoder captures public `ScanResult` / `ScanRecord` fields available through the compile SDK (API 35), with guards for older Android releases. New payloads have `bluetooth_capture_version=2` and `captured_api_level`. Existing records are not rewritten because omitted scan data cannot be recovered.
+
+| Source | Captured data |
+| --- | --- |
+| BLE payload | Complete `raw_scan_record_hex`; ordered `advertising_structures` retaining duplicate/unknown AD types, offsets, declared lengths, and truncation flags; original advertisement name, discoverability flags, advertised TX power, manufacturer data, service UUIDs, service data, and service solicitation UUIDs (API 29+) |
+| Android decoded AD map | `android_advertising_data_map` on API 33+, alongside raw bytes because Android maps can overwrite duplicate AD types |
+| BLE radio result | RSSI, scan timestamp, scan-result TX power and its raw value, primary/secondary PHY, legacy/connectable flags, data status, advertising SID, periodic interval in raw 1.25 ms units and milliseconds |
+| Callback | Callback type for individual results, delivery mode, and batch index/size for batches; all members of a batch share the callback arrival timestamps |
+| Device cache | Cached device name, device type, bond state, cached UUIDs, full class representation, device/major classes and service flags; alias on API 30+, address type on API 35+ |
+| Classic discovery | Broadcast name/RSSI/class preferred over cached values; complete supported broadcast extras, including coordinated-set membership, scalar/array fields and UUIDs; unsupported future object types explicitly identified |
+
+The previous encoder omitted raw/unknown advertisement fields and most radio metadata. It also checked the wrong absent-TX-power sentinel: `ScanResult` uses **127**, while `ScanRecord` uses `Integer.MIN_VALUE`. `tx_power` now becomes null when scan-result TX power is absent; `advertised_tx_power` is recorded separately, and `tx_power_raw` preserves the original result value. Other integer codes (SID, PHY, data status) retain their Android values, including sentinel values. The scanner requests both legacy and extended advertising where supported, with a legacy fallback if the device rejects that feature. Android may still truncate a result; the data-status code and raw bytes preserve what was actually delivered.
+
+Each permission-sensitive device getter is handled independently. Losing permission to read cached metadata does not discard available BLE bytes, RSSI or measurement time. `device_metadata.unavailable_fields` identifies failed metadata reads. The app does not initiate GATT connections or SDP requests to invent additional scan data. The GPS-only rule still applies: classic discovery lacks a measurement timestamp, and unlocated observations are discarded after correlation.
+
+References: Android [ScanResult](https://developer.android.com/reference/android/bluetooth/le/ScanResult), [ScanRecord](https://developer.android.com/reference/android/bluetooth/le/ScanRecord), and [BluetoothDevice](https://developer.android.com/reference/android/bluetooth/BluetoothDevice).
+
+## Database size and permanent reset
+
+The recorder shows **Database on disk**, refreshed approximately once per second while the screen is visible, including during recording. This is the sum of `pocketdriver.db`, `-wal`, `-shm`, and `-journal` file lengths. It includes SQLite working space and free pages still allocated to those files; it excludes map caches and exported CSVs. Exporting uses a separate worker so a slow document provider does not hold up size/stat updates.
+
+Open the menu beside that size and select **Erase all app data**. An explicit confirmation lists what will be removed. On confirmation, the app delegates to Android [clearApplicationUserData](https://developer.android.com/reference/android/app/ActivityManager#clearApplicationUserData()), which stops the app and clears its dynamic private/app-specific external data: recordings and SQLite sidecars, key preferences and app Keystore entries, cached maps, preferences, and temporary files. Android resets runtime permissions and URI grants; the app closes and starts fresh when relaunched. The installed APK/bundled vendor directory remain installed. If the system rejects the request, the app reports failure without manually deleting files or keys.
+
+CSV exports and legacy JSONL files outside app storage are not deleted. This is an Android app-data reset, not a promise of physical block overwriting on flash storage. Reset tests use Robolectric's simulated system; they never erase a real installation.
+
 ## CSV format
 
 UTF-8, quoted fields, escaped double quotes, CRLF record separators. Columns:
@@ -70,7 +97,7 @@ The interface follows the system light/dark setting, with separate scan metrics,
 
 ## Build and test
 
-Requirements: JDK 17, Android SDK API 35, Gradle 8.11.1 (wrapper JAR and configuration included). Point `ANDROID_HOME` to the SDK or set `sdk.dir` in an untracked `local.properties`.
+Requirements: JDK 17, Android SDK API 35, Gradle 8.11.1 (wrapper JAR and configuration included). JVM Android API tests use Robolectric 4.14.1 with SDKs 26, 29, 33 and 35. Point `ANDROID_HOME` to the SDK or set `sdk.dir` in an untracked `local.properties`.
 
 ```bash
 gradle :app:assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest
@@ -80,7 +107,7 @@ gradle :app:connectedDebugAndroidTest
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
-There were no tests in the original repository. JVM tests now cover CSV escaping, elapsed time, session table validation, distance/date-line math, Wi-Fi cache deduplication, channel mapping, security classification, MAC manufacturer longest-prefix lookup and address validation, grouped observation identity/counts, coordinate validation, and measurement-time GPS correlation (delayed/out-of-order signals and GPS fixes, interpolation, date-line handling, timing gaps, invalid timestamps, wall-clock changes, bounded buffering and stop-time flushing). Android instrumentation tests cover actual encrypted database transactions, session isolation, both Bluetooth transports, coordinate handling, full/single/empty exports, concurrent export/writes, persisted observations after reopen, interrupted-session recovery, wrong-key rejection, Keystore wrapping, matched-location/timing metadata surviving CSV export, explicit handling of missing measurement timestamps, GPS-only database migration/count repair, grouped lists, filtered group maps, and the bundled vendor directory.
+There were no tests in the original repository. Local tests now cover Bluetooth payload/metadata encoding across Android API levels, TX-power sentinel handling, raw duplicate/unknown/truncated AD fields, permission revocation, size accounting with SQLite sidecars, cancellation/confirmation/rejected reset requests in a simulated system, and CSV escaping, elapsed time, session table validation, distance/date-line math, Wi-Fi cache deduplication, channel mapping, security classification, MAC manufacturer longest-prefix lookup and address validation, grouped observation identity/counts, coordinate validation, and measurement-time GPS correlation (delayed/out-of-order signals and GPS fixes, interpolation, date-line handling, timing gaps, invalid timestamps, wall-clock changes, bounded buffering and stop-time flushing). Android instrumentation tests cover actual encrypted database transactions, session isolation, both Bluetooth transports, coordinate handling, full/single/empty exports, concurrent export/writes, persisted observations after reopen, interrupted-session recovery, wrong-key rejection, Keystore wrapping, matched-location/timing metadata surviving CSV export, explicit handling of missing measurement timestamps, GPS-only database migration/count repair, grouped lists, filtered group maps, and the bundled vendor directory.
 
 For physical-device QA: start and stop multiple scans, reopen the app, confirm history and points, export one recording and all recordings via the document picker, deny/regrant permissions, disable radios, and confirm scanning resumes when they are enabled. Check background recording and compare observed signals with known nearby devices; an emulator cannot validate the radio data.
 

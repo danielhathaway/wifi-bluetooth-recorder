@@ -7,7 +7,7 @@ import net.zetetic.database.sqlcipher.SQLiteDatabase
 import java.io.Writer
 
 /** Serialized recording commits with separate read connections for streaming exports. */
-class RecordingStore internal constructor(context: Context, databaseName: String = "pocketdriver.db",
+class RecordingStore internal constructor(context: Context, databaseName: String = DatabaseFiles.NAME,
     private val password: String = DatabaseKey.password(context)) {
     private val file = context.getDatabasePath(databaseName)
     private val db: SQLiteDatabase

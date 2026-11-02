@@ -28,7 +28,7 @@ internal object DatabaseKey {
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
             return String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
         }
-        check(!context.getDatabasePath("pocketdriver.db").exists()) { "Database key is missing; existing database was preserved." }
+        check(!context.getDatabasePath(DatabaseFiles.NAME).exists()) { "Database key is missing; existing database was preserved." }
         val password = Base64.encodeToString(ByteArray(32).also { SecureRandom().nextBytes(it) }, Base64.NO_WRAP)
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val wrapped = cipher.iv + cipher.doFinal(password.toByteArray(Charsets.UTF_8))

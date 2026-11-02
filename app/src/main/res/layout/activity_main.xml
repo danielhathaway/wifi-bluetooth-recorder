@@ -65,6 +65,12 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:gravity="center_vertical">
+            <ImageView android:layout_width="20dp" android:layout_height="20dp" android:src="@drawable/ic_database" android:importantForAccessibility="no" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:text="@string/database_size_label" android:textAppearance="@style/Text.PocketDriver.Body" />
+            <TextView android:id="@+id/databaseSizeValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/database_size_loading" android:textColor="@color/app_text" android:textSize="14sp" android:fontFeatureSettings="tnum" />
+            <ImageButton android:id="@+id/manageStorageButton" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_more" android:background="?attr/selectableItemBackgroundBorderless" android:padding="12dp" android:contentDescription="@string/manage_storage" />
+        </LinearLayout>
         <com.google.android.material.card.MaterialCardView android:id="@+id/historyButton" style="@style/Widget.PocketDriver.Card"
             android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="28dp" android:clickable="true" android:focusable="true">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="20dp" android:gravity="center_vertical">
