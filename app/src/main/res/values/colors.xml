@@ -1,0 +1,17 @@
+<resources>
+    <color name="app_background">#F5F6F2</color>
+    <color name="app_surface">#FFFFFF</color>
+    <color name="app_surface_alt">#EBF0E9</color>
+    <color name="app_text">#17221D</color>
+    <color name="app_muted">#5E6C64</color>
+    <color name="app_outline">#DFE5DF</color>
+    <color name="app_primary">#24694D</color>
+    <color name="app_on_primary">#FFFFFF</color>
+    <color name="app_badge">#E0EEE5</color>
+    <color name="app_hero">#152B22</color>
+    <color name="app_on_hero">#F4F7EE</color>
+    <color name="app_hero_muted">#ADC5B6</color>
+    <color name="app_error">#A52C2C</color>
+    <color name="app_error_surface">#FCEBE7</color>
+    <bool name="light_system_bars">true</bool>
+</resources>

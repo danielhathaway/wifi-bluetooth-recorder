@@ -58,6 +58,8 @@ The app does not upload observation records. Viewing maps downloads OpenStreetMa
 
 The launcher label is **PocketDriver**. Its vector adaptive icon has separate full-bleed background and foreground layers on a 108dp canvas, with a pocket/road symbol inside the central 66dp safe zone and a monochrome layer for themed icons. The application ID remains `com.example.wifibluetoothrecorder` so this can update an existing installation.
 
+The interface follows the system light/dark setting, with separate scan metrics, session cards, accessible controls, and a landscape map layout. Recording and map privacy details are available through the information controls.
+
 ## Build and test
 
 Requirements: JDK 17, Android SDK API 35, Gradle 8.11.1 (wrapper JAR and configuration included). Point `ANDROID_HOME` to the SDK or set `sdk.dir` in an untracked `local.properties`.

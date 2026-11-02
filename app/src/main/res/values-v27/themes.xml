@@ -1,0 +1,1 @@
+<resources><style name="Theme.WifiBluetoothRecorder" parent="Theme.PocketDriver.Base"><item name="android:windowLightNavigationBar">@bool/light_system_bars</item></style></resources>

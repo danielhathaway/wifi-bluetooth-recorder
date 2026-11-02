@@ -1,0 +1,22 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@color/app_background">
+    <com.google.android.material.appbar.MaterialToolbar android:id="@+id/historyToolbar" android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+        app:title="@string/history_title" app:titleTextColor="@color/app_text" app:navigationIcon="@drawable/ic_back" app:navigationContentDescription="@string/back_description" />
+    <androidx.core.widget.NestedScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
+        <LinearLayout android:id="@+id/historyContent" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp" android:paddingTop="16dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/history_label" android:textAppearance="@style/Text.PocketDriver.Label" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/library_title" android:textAppearance="@style/Text.PocketDriver.Title" />
+            <TextView android:id="@+id/historySubtitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="24dp" android:text="@string/history_description" android:textAppearance="@style/Text.PocketDriver.Body" />
+            <ProgressBar android:id="@+id/historyProgress" android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="center_horizontal" android:contentDescription="@string/history_loading" />
+            <com.google.android.material.card.MaterialCardView android:id="@+id/emptyState" style="@style/Widget.PocketDriver.Card" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="28dp" android:gravity="center_horizontal">
+                    <ImageView android:layout_width="40dp" android:layout_height="40dp" android:layout_marginTop="12dp" android:src="@drawable/ic_route" app:tint="@color/app_primary" android:importantForAccessibility="no" />
+                    <TextView android:id="@+id/emptyTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="@string/history_empty_title" android:textColor="@color/app_text" android:textSize="22sp" android:gravity="center" android:fontFamily="sans-serif-medium" />
+                    <TextView android:id="@+id/emptyBody" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/history_empty_body" android:textAppearance="@style/Text.PocketDriver.Body" android:gravity="center" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/emptyAction" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="@string/back_to_recorder" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <LinearLayout android:id="@+id/recordingList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</LinearLayout>

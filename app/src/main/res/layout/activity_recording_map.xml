@@ -1,0 +1,42 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@color/app_background">
+    <com.google.android.material.appbar.MaterialToolbar android:id="@+id/mapToolbar" android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+        app:title="@string/map_title" app:titleTextColor="@color/app_text" app:subtitleTextColor="@color/app_muted" app:navigationIcon="@drawable/ic_back" app:navigationContentDescription="@string/back_description" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="24dp" android:paddingTop="8dp">
+        <com.google.android.material.card.MaterialCardView style="@style/Widget.PocketDriver.Card" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="20dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="16dp" android:baselineAligned="false">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:paddingHorizontal="4dp">
+                    <TextView android:id="@+id/mapWifiValue" android:layout_width="match_parent" android:layout_height="32dp" android:text="@string/number_unavailable" android:textAppearance="@style/Text.PocketDriver.Metric" android:maxLines="1" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="12sp" android:autoSizeMaxTextSize="22sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/wifi_label" android:textSize="11sp" android:textColor="@color/app_muted" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:paddingHorizontal="4dp">
+                    <TextView android:id="@+id/mapBluetoothValue" android:layout_width="match_parent" android:layout_height="32dp" android:text="@string/number_unavailable" android:textAppearance="@style/Text.PocketDriver.Metric" android:maxLines="1" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="12sp" android:autoSizeMaxTextSize="22sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/bluetooth_label" android:textSize="11sp" android:textColor="@color/app_muted" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:paddingHorizontal="4dp">
+                    <TextView android:id="@+id/mapDistanceValue" android:layout_width="match_parent" android:layout_height="32dp" android:text="@string/number_unavailable" android:textAppearance="@style/Text.PocketDriver.Metric" android:maxLines="1" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="12sp" android:autoSizeMaxTextSize="22sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/distance_label" android:textSize="11sp" android:textColor="@color/app_muted" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+    <FrameLayout android:id="@+id/mapFrame" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:layout_marginHorizontal="24dp" android:layout_marginVertical="16dp" android:background="@drawable/bg_map">
+        <FrameLayout android:id="@+id/mapHost" android:layout_width="match_parent" android:layout_height="match_parent" />
+        <TextView android:id="@+id/mapCountText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_margin="12dp" android:background="@drawable/bg_status" android:paddingHorizontal="12dp" android:paddingVertical="8dp" android:textColor="@color/app_primary" android:textSize="12sp" android:text="@string/map_loading" />
+        <ProgressBar android:id="@+id/mapProgress" android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="center" android:contentDescription="@string/map_loading" />
+        <LinearLayout android:id="@+id/mapEmptyState" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="center" android:layout_margin="16dp" android:padding="24dp" android:background="@drawable/bg_map" android:orientation="vertical" android:gravity="center_horizontal" android:visibility="gone">
+            <ImageView android:layout_width="32dp" android:layout_height="32dp" android:src="@drawable/ic_pin" app:tint="@color/app_primary" android:importantForAccessibility="no" />
+            <TextView android:id="@+id/mapEmptyTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="@string/map_empty_title" android:textColor="@color/app_text" android:textSize="20sp" android:fontFamily="sans-serif-medium" android:gravity="center" />
+            <TextView android:id="@+id/mapEmptyBody" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/map_empty_body" android:textAppearance="@style/Text.PocketDriver.Body" android:gravity="center" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="bottom|end" android:layout_margin="12dp" android:orientation="vertical">
+            <com.google.android.material.button.MaterialButton android:id="@+id/zoomInButton" style="@style/Widget.PocketDriver.Button.Outlined" android:layout_width="48dp" android:layout_height="48dp" android:minWidth="0dp" android:minHeight="48dp" android:padding="0dp" android:contentDescription="@string/zoom_in" app:icon="@drawable/ic_plus" app:iconPadding="0dp" app:iconGravity="textStart" app:backgroundTint="@color/app_surface" app:strokeWidth="0dp" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/zoomOutButton" style="@style/Widget.PocketDriver.Button.Outlined" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginTop="8dp" android:minWidth="0dp" android:minHeight="48dp" android:padding="0dp" android:contentDescription="@string/zoom_out" app:icon="@drawable/ic_minus" app:iconPadding="0dp" app:iconGravity="textStart" app:backgroundTint="@color/app_surface" app:strokeWidth="0dp" />
+        </LinearLayout>
+    </FrameLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="24dp" android:paddingBottom="12dp">
+        <com.google.android.material.button.MaterialButton android:id="@+id/exportRecordingButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/export_recording" android:enabled="false" app:icon="@drawable/ic_export" app:iconGravity="textStart" />
+        <TextView android:id="@+id/mapAttribution" android:layout_width="match_parent" android:layout_height="48dp" android:text="@string/map_attribution" android:textSize="12sp" android:textColor="@color/app_muted" android:gravity="center" android:background="?attr/selectableItemBackground" android:clickable="true" android:focusable="true" />
+    </LinearLayout>
+</LinearLayout>

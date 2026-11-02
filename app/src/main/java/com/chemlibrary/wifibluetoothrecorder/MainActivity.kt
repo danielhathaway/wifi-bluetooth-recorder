@@ -7,11 +7,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.Locale
 import java.util.concurrent.Executors
 
@@ -19,11 +22,19 @@ class MainActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var status: TextView
-    private lateinit var stats: TextView
+    private lateinit var elapsed: TextView
+    private lateinit var wifi: TextView
+    private lateinit var bluetooth: TextView
+    private lateinit var distance: TextView
     private lateinit var start: Button
     private lateinit var stop: Button
     private var lastRecording: Recording? = null
     private var resumed = false
+    private var starting = false
+    private var stopping = false
+    private var issue: String? = null
+    private var storageIssue: String? = null
+
     private val refresh = object : Runnable {
         override fun run() {
             if (!resumed) return
@@ -31,68 +42,131 @@ class MainActivity : AppCompatActivity() {
             worker.execute {
                 try {
                     val latest = RecordingStore.get(this@MainActivity).recordings().firstOrNull()
-                    runOnUiThread { lastRecording = latest; render() }
-                } catch (e: Exception) { runOnUiThread { status.text = "Storage unavailable: ${e.message}" } }
+                    runOnUiThread {
+                        if (!isDestroyed) { lastRecording = latest; storageIssue = null; render() }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        if (!isDestroyed) { storageIssue = getString(R.string.storage_error, e.message); render() }
+                    }
+                }
             }
             handler.postDelayed(this, 1000)
         }
     }
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (canRecord()) begin() else status.text = "Precise location and Bluetooth permissions are required to record."
+        if (canRecord()) begin() else showIssue(getString(R.string.permissions_required))
     }
     private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) worker.execute {
             try {
                 val output = contentResolver.openOutputStream(uri) ?: error("Cannot open destination")
                 output.bufferedWriter(Charsets.UTF_8).use { RecordingStore.get(this).export(it) }
-                runOnUiThread { android.widget.Toast.makeText(this, "Database exported", android.widget.Toast.LENGTH_LONG).show() }
-            } catch (e: Exception) { runOnUiThread { android.widget.Toast.makeText(this, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show() } }
+                runOnUiThread { Toast.makeText(this, R.string.export_success, Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, getString(R.string.export_error, e.message), Toast.LENGTH_LONG).show() }
+            }
         }
     }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         fitSystemBars()
+        UiFormat.centerContent(findViewById(R.id.mainContent))
         status = findViewById(R.id.statusText)
-        stats = findViewById(R.id.statsText)
+        elapsed = findViewById(R.id.elapsedValue)
+        wifi = findViewById(R.id.wifiValue)
+        bluetooth = findViewById(R.id.bluetoothValue)
+        distance = findViewById(R.id.distanceValue)
         start = findViewById(R.id.startButton)
         stop = findViewById(R.id.stopButton)
-        start.setOnClickListener {
-            val needed = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-            if(Build.VERSION.SDK_INT >= 31) needed += listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-            if(Build.VERSION.SDK_INT >= 33) needed += Manifest.permission.POST_NOTIFICATIONS
-            val missing = needed.filter { ContextCompat.checkSelfPermission(this,it) != PackageManager.PERMISSION_GRANTED }
-            if(missing.isEmpty()) begin() else permissions.launch(missing.toTypedArray())
+        start.setOnClickListener { requestRecordingPermissions() }
+        stop.setOnClickListener {
+            stopping = true
+            stopService(Intent(this, RecordingService::class.java))
+            render()
         }
-        stop.setOnClickListener { stopService(Intent(this, RecordingService::class.java)); render() }
+        findViewById<View>(R.id.historyButton).setOnClickListener {
+            startActivity(Intent(this, HistoryActivity::class.java))
+        }
         findViewById<Button>(R.id.exportButton).setOnClickListener { export.launch("PocketDriver-database.csv") }
-        findViewById<Button>(R.id.historyButton).setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }
+        findViewById<View>(R.id.aboutButton).setOnClickListener {
+            MaterialAlertDialogBuilder(this).setTitle(R.string.about_title).setMessage(R.string.about_body)
+                .setPositiveButton(R.string.about_action, null).show()
+        }
+        render()
     }
-    private fun canRecord(): Boolean = ContextCompat.checkSelfPermission(this,Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
+
+    private fun requestRecordingPermissions() {
+        issue = null
+        val needed = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (Build.VERSION.SDK_INT >= 31) needed += listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        if (Build.VERSION.SDK_INT >= 33) needed += Manifest.permission.POST_NOTIFICATIONS
+        val missing = needed.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) begin() else permissions.launch(missing.toTypedArray())
+    }
+
+    private fun canRecord(): Boolean = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
         (Build.VERSION.SDK_INT < 31 || listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT).all {
-            ContextCompat.checkSelfPermission(this,it) == PackageManager.PERMISSION_GRANTED })
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        })
+
     private fun begin() {
-        if (!canRecord()) return
+        if (!canRecord()) { showIssue(getString(R.string.permissions_required)); return }
         if (!androidx.core.location.LocationManagerCompat.isLocationEnabled(getSystemService(android.location.LocationManager::class.java))) {
-            status.text = "Enable device location services before recording."; return
+            showIssue(getString(R.string.location_required)); return
         }
-        try { ContextCompat.startForegroundService(this,Intent(this,RecordingService::class.java)); start.isEnabled=false }
-        catch(e: Exception) { status.text="Unable to start: ${e.message}" }
+        try {
+            issue = null
+            ContextCompat.startForegroundService(this, Intent(this, RecordingService::class.java))
+            starting = true
+            render()
+        } catch (e: Exception) { showIssue(getString(R.string.start_error, e.message)) }
     }
+
+    private fun showIssue(message: String) { issue = message; starting = false; render() }
+
     private fun render() {
-        val running = RecordingService.isRunning
-        val saving = !running && RecordingService.currentId != null
-        start.isEnabled = !running && !saving
+        if (RecordingService.isRunning || RecordingService.error != null) starting = false
+        if (!RecordingService.isRunning && RecordingService.currentId == null) stopping = false
+        val running = RecordingService.isRunning && !stopping
+        val saving = stopping || (!RecordingService.isRunning && RecordingService.currentId != null)
+        val problem = issue ?: storageIssue ?: RecordingService.error
+        start.isEnabled = !running && !saving && !starting
         stop.isEnabled = running
-        status.text = RecordingService.error ?: if(running) "Recording" else if(saving) "Finishing recording…" else "Stopped"
-        val r = lastRecording
-        stats.text = if(r == null) "Elapsed: 00:00:00\nBluetooth records: 0\nWi-Fi networks scanned: 0\nDistance: 0 m" else {
-            val seconds = r.elapsed(System.currentTimeMillis())
-            String.format(Locale.getDefault(), "Elapsed: %02d:%02d:%02d\nBluetooth records: %d\nWi-Fi networks scanned: %d\nDistance: %.0f m",
-                seconds/3600, seconds/60%60, seconds%60, r.bluetooth,r.wifi,r.distance)
+        start.alpha = if (start.isEnabled) 1f else 0.5f
+        start.visibility = if (running) View.GONE else View.VISIBLE
+        stop.visibility = if (running) View.VISIBLE else View.GONE
+        status.setText(when {
+            saving -> R.string.status_saving
+            running -> R.string.status_recording
+            starting -> R.string.status_starting
+            problem != null -> R.string.status_error
+            else -> R.string.status_ready
+        })
+        findViewById<TextView>(R.id.errorText).apply {
+            text = problem
+            visibility = if (problem == null) View.GONE else View.VISIBLE
         }
+        val r = lastRecording?.takeIf { !RecordingService.isRunning || it.id == RecordingService.currentId }
+        findViewById<TextView>(R.id.sessionLabel).setText(when {
+            running || starting || saving -> R.string.session_live
+            r != null -> R.string.session_last
+            else -> R.string.session_new
+        })
+        val seconds = r?.elapsed(System.currentTimeMillis()) ?: 0
+        elapsed.text = String.format(Locale.getDefault(), "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+        wifi.text = UiFormat.number(r?.wifi ?: 0)
+        bluetooth.text = UiFormat.number(r?.bluetooth ?: 0)
+        distance.text = UiFormat.distance(this, r?.distance ?: 0.0)
+        elapsed.contentDescription = getString(R.string.elapsed_accessibility, elapsed.text)
+        wifi.contentDescription = getString(R.string.wifi_accessibility, wifi.text)
+        bluetooth.contentDescription = getString(R.string.bluetooth_accessibility, bluetooth.text)
+        distance.contentDescription = getString(R.string.distance_accessibility, distance.text)
     }
-    override fun onResume() { super.onResume(); resumed=true; handler.post(refresh) }
-    override fun onPause() { resumed=false; handler.removeCallbacks(refresh); super.onPause() }
+
+    override fun onResume() { super.onResume(); resumed = true; handler.post(refresh) }
+    override fun onPause() { resumed = false; handler.removeCallbacks(refresh); super.onPause() }
     override fun onDestroy() { worker.shutdown(); super.onDestroy() }
 }

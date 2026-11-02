@@ -3,6 +3,7 @@ package com.example.wifibluetoothrecorder
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import org.junit.Assert.*
@@ -14,9 +15,11 @@ class ScreenTest {
     @Test fun mainScreenShowsSummaryHistoryAndCsvActions() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                assertTrue(activity.findViewById<TextView>(R.id.statsText).text.contains("Elapsed:"))
-                assertTrue(activity.findViewById<TextView>(R.id.statsText).text.contains("Bluetooth records:"))
-                assertTrue(activity.findViewById<Button>(R.id.historyButton).isEnabled)
+                assertTrue(activity.findViewById<TextView>(R.id.elapsedValue).text.isNotBlank())
+                assertTrue(activity.findViewById<TextView>(R.id.wifiValue).contentDescription.contains("Wi-Fi"))
+                assertTrue(activity.findViewById<TextView>(R.id.bluetoothValue).contentDescription.contains("Bluetooth"))
+                assertTrue(activity.findViewById<TextView>(R.id.distanceValue).contentDescription.isNotBlank())
+                assertTrue(activity.findViewById<View>(R.id.historyButton).isClickable)
                 assertTrue(activity.findViewById<Button>(R.id.exportButton).text.contains("CSV"))
                 assertFalse(activity.findViewById<Button>(R.id.stopButton).isEnabled)
             }
