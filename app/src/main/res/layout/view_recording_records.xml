@@ -1,0 +1,11 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/listPanel"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:visibility="gone">
+    <TextView android:id="@+id/groupsSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="24dp" android:paddingTop="16dp" android:textAppearance="@style/Text.PocketDriver.Body" />
+    <TextView android:id="@+id/groupsHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="24dp" android:paddingTop="8dp" android:paddingBottom="8dp" android:text="@string/group_hint" android:textSize="12sp" android:textColor="@color/app_muted" />
+    <TextView android:id="@+id/vendorHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="24dp" android:paddingBottom="8dp" android:text="@string/vendor_hint" android:textSize="12sp" android:textColor="@color/app_muted" android:visibility="gone" />
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/recordsList" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="24dp" android:paddingTop="12dp" android:clipToPadding="false" />
+        <ProgressBar android:id="@+id/groupsProgress" android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="center" android:contentDescription="@string/records_loading" android:visibility="gone" />
+        <TextView android:id="@+id/groupsEmpty" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="center" android:padding="32dp" android:gravity="center" android:text="@string/no_groups" android:textAppearance="@style/Text.PocketDriver.Body" android:visibility="gone" />
+    </FrameLayout>
+</LinearLayout>

@@ -291,7 +291,8 @@ class RecordingService : Service() {
         val rows = signalBuffer.drain(SystemClock.elapsedRealtimeNanos(), force).map { located ->
             located.toObservation()
         }
-        if (rows.isNotEmpty()) database.append(id, rows)
+        val located = rows.filter { it.hasCoordinates() }
+        if (located.isNotEmpty()) database.append(id, located)
     }
 
     @SuppressLint("MissingPermission")

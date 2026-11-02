@@ -37,6 +37,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("net.zetetic:sqlcipher-android:4.10.0@aar")
     implementation("androidx.sqlite:sqlite:2.4.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")

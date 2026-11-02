@@ -24,7 +24,7 @@
     <string name="export_database">Export all as CSV</string>
     <string name="privacy_note">Private on device. CSV exports are unencrypted.</string>
     <string name="about_title">About your recordings</string>
-    <string name="about_body">Wi-Fi and Bluetooth counts show saved observations, including repeat sightings. Wi-Fi and BLE locations are matched to signal measurement time; missing matches have no coordinates. Distance is estimated from location fixes. Android may throttle radio scans.\n\nRecordings are encrypted on this device. CSV exports are unencrypted. Maps request tiles from OpenStreetMap, which receives the requested map area and your network address.</string>
+    <string name="about_body">Wi-Fi and Bluetooth counts show saved observations, including repeat sightings. Wi-Fi and BLE locations are matched to signal measurement time; only observations with usable GPS coordinates are retained. Distance is estimated from location fixes. Android may throttle radio scans.\n\nRecordings are encrypted on this device. CSV exports are unencrypted. Maps request tiles from OpenStreetMap, which receives the requested map area and your network address.</string>
     <string name="about_action">Got it</string>
     <string name="about_description">About recording and privacy</string>
     <string name="back_description">Go back</string>
@@ -46,8 +46,8 @@
     <string name="map_loading">Loading session…</string>
     <string name="map_points">%1$s mapped locations</string>
     <string name="map_empty_title">No locations to show</string>
-    <string name="map_empty_body">Your observations are saved. Points appear only when a suitable location fix is available.</string>
-    <string name="export_recording">Export CSV</string>
+    <string name="map_empty_body">This recording has no observations with usable GPS coordinates.</string>
+    <string name="export_recording">Export session CSV</string>
     <string name="map_attribution">© OpenStreetMap contributors</string>
     <string name="map_privacy">About map data and privacy</string>
     <string name="permissions_required">Allow precise location and Bluetooth access to start recording.</string>
@@ -72,4 +72,23 @@
     <string name="number_unavailable">—</string>
     <string name="zoom_in">Zoom in</string>
     <string name="zoom_out">Zoom out</string>
+    <string name="tab_map">Map</string>
+    <string name="tab_wifi">Wi-Fi</string>
+    <string name="tab_bluetooth">Bluetooth</string>
+    <string name="tab_gps">GPS</string>
+    <string name="records_loading">Loading observations…</string>
+    <string name="group_hint">Repeated observations are combined. Tap an entry to map its locations.</string>
+    <string name="vendor_hint">Manufacturer names are inferred from MAC prefixes. Private or randomized addresses may be unknown.</string>
+    <string name="groups_summary">%1$s entries · %2$s observations</string>
+    <string name="no_groups">No located observations of this type.</string>
+    <string name="groups_error">Unable to load observations: %1$s</string>
+    <string name="hidden_network">Hidden network</string>
+    <string name="unnamed_device">Unnamed device</string>
+    <string name="unknown_security">Unknown security</string>
+    <string name="unknown_vendor">Unknown manufacturer</string>
+    <string name="private_address">Private or randomized address</string>
+    <string name="gps_accuracy">Fix accuracy: %1$s m</string>
+    <string name="gps_fix">GPS location</string>
+    <string name="group_observations">%1$s observations · Last seen %2$s</string>
+    <string name="group_map_accessibility">%1$s. %2$s. %3$s. %4$s. View locations on map.</string>
 </resources>

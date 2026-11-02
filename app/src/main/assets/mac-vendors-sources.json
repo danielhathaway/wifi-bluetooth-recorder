@@ -1,0 +1,8 @@
+{
+  "source": "https://www.wireshark.org/download/automated/data/manuf.gz",
+  "entries": 58645,
+  "last_modified": "Sun, 01 Nov 2026 10:35:04 GMT",
+  "sha256": "1d5af1384a78bbbeba80233d02eb8f04ec7abb9913fddbe1ab4f43efdfcfc70f",
+  "upstream": "https://gitlab.com/wireshark/wireshark/-/blob/master/tools/make-manuf.py",
+  "license": "GPL-2.0-or-later; distributed here under the project GPL-3.0 license"
+}

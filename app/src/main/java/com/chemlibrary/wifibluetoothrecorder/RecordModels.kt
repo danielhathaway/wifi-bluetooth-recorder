@@ -4,7 +4,10 @@ import java.io.Writer
 import kotlin.math.*
 
 data class Observation(val time: Long, val type: String, val transport: String = "",
-    val latitude: Double? = null, val longitude: Double? = null, val data: String = "{}")
+    val latitude: Double? = null, val longitude: Double? = null, val data: String = "{}") {
+    fun hasCoordinates(): Boolean = latitude != null && longitude != null &&
+        latitude.isFinite() && longitude.isFinite() && latitude in -90.0..90.0 && longitude in -180.0..180.0
+}
 data class Recording(val id: Long, val started: Long, val ended: Long?, val bluetooth: Long,
     val wifi: Long, val distance: Double, val lastSaved: Long) {
     fun elapsed(now: Long) = ((ended ?: now) - started).coerceAtLeast(0) / 1000

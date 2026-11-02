@@ -1,0 +1,13 @@
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    style="@style/Widget.PocketDriver.Card" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:clickable="true" android:focusable="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="20dp" android:gravity="top">
+        <ImageView android:id="@+id/groupIcon" android:layout_width="22dp" android:layout_height="22dp" android:layout_marginTop="2dp" app:tint="@color/app_primary" android:importantForAccessibility="no" />
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:layout_marginEnd="8dp" android:orientation="vertical" android:importantForAccessibility="noHideDescendants">
+            <TextView android:id="@+id/groupName" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="17sp" android:textColor="@color/app_text" android:fontFamily="sans-serif-medium" android:maxLines="2" android:ellipsize="end" />
+            <TextView android:id="@+id/groupDetail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="14sp" android:textColor="@color/app_muted" android:maxLines="2" android:ellipsize="end" />
+            <TextView android:id="@+id/groupAddress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textSize="12sp" android:fontFamily="monospace" android:textColor="@color/app_muted" />
+            <TextView android:id="@+id/groupCount" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textSize="12sp" android:textColor="@color/app_muted" />
+        </LinearLayout>
+        <ImageView android:layout_width="20dp" android:layout_height="20dp" android:src="@drawable/ic_arrow" app:tint="@color/app_primary" android:importantForAccessibility="no" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

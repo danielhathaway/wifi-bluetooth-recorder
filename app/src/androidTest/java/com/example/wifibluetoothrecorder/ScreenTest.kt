@@ -3,6 +3,7 @@ package com.example.wifibluetoothrecorder
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.google.android.material.tabs.TabLayout
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
@@ -34,7 +35,16 @@ class ScreenTest {
         RecordingStore.get(context).finish(id)
         val intent=android.content.Intent(context,RecordingMapActivity::class.java).putExtra("recording_id",id)
         ActivityScenario.launch<RecordingMapActivity>(intent).use { scenario ->
-            scenario.onActivity { assertFalse(it.isFinishing) }
+            scenario.onActivity {
+                assertFalse(it.isFinishing)
+                val tabs=it.findViewById<TabLayout>(R.id.recordingTabs)
+                assertEquals(4,tabs.tabCount)
+                tabs.getTabAt(1)!!.select()
+                assertEquals(View.VISIBLE,it.findViewById<View>(R.id.listPanel).visibility)
+                assertEquals(View.GONE,it.findViewById<View>(R.id.mapPanel).visibility)
+            }
+            scenario.recreate()
+            scenario.onActivity { assertEquals(1,it.findViewById<TabLayout>(R.id.recordingTabs).selectedTabPosition) }
         }
     }
     @Test fun launcherUsesPocketDriverLabelAndAdaptiveIcon() {
